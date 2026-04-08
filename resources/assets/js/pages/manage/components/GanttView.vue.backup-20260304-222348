@@ -1,0 +1,1647 @@
+<template>
+  <div class="calendar-year-view">
+
+    <!-- ================== 顶部日期表头 ================== -->
+    <div class="year-header">
+
+      <!-- 左侧固定列 -->
+      <div class="header-left">
+        项目
+      </div>
+
+      <!-- 右侧日期滚动区 -->
+      <div class="header-right">
+        <div
+          class="dates-scroll"
+          ref="headerScroll"
+        >
+          <!-- 第一行：月份 -->
+          <div class="date-row month-row">
+            <div
+              v-for="monthInfo in monthsInfo"
+              :key="'month-' + monthInfo.month"
+              class="date-cell month-cell"
+              :class="{
+                'today': visibleDays[monthInfo.startIndex] && visibleDays[monthInfo.startIndex].isToday
+              }"
+              :style="{ width: monthInfo.width + 'px', minWidth: monthInfo.width + 'px' }"
+            >
+              <span>{{ monthInfo.month }}月</span>
+            </div>
+          </div>
+
+          <!-- 第二行：日期 -->
+          <div class="date-row day-row">
+            <div
+              v-for="day in visibleDays"
+              :key="'day-' + day.date"
+              class="date-cell"
+              :class="{
+                'month-start': day.isMonthStart,
+                'today': day.isToday,
+                'selected': selectedDate === day.date
+              }"
+              :style="{ width: dayWidth + 'px' }"
+              @click="selectDate(day.date)"
+            >
+              {{ day.day }}
+            </div>
+          </div>
+
+          <!-- 第三行：星期 -->
+          <div class="date-row week-row">
+            <div
+              v-for="day in visibleDays"
+              :key="'week-' + day.date"
+              class="date-cell"
+              :class="{
+                'month-start': day.isMonthStart,
+                'today': day.isToday,
+                'selected': selectedDate === day.date
+              }"
+              :style="{ width: dayWidth + 'px' }"
+              @click="selectDate(day.date)"
+            >
+              {{ day.weekday }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================== 主体内容 ================== -->
+    <div
+      class="year-content"
+      ref="contentScroll"
+      @scroll="onContentScroll"
+    >
+
+      <!-- 整体虚拟容器 -->
+      <div
+        :style="{
+          height: totalHeight + 'px',
+          position: 'relative',
+          minWidth: totalWidth + 'px'
+        }"
+      >
+
+        <!-- 仅渲染可视区域项目（虚拟滚动） -->
+        <div
+          v-for="(project, index) in visibleProjects"
+          :key="project.id"
+          class="project-row"
+          :class="{ 'project-row-even': index % 2 === 0 }"
+          :style="{
+            top: project._top + 'px',
+            height: project.height + 'px'
+          }"
+        >
+
+          <!-- 左侧项目名和任务列表（固定） -->
+          <div class="row-left" @wheel.prevent="onLeftWheel">
+            <!-- 项目名 -->
+            <div class="project-name-header">{{ project.name }}</div>
+
+            <!-- 任务列表 -->
+            <div class="task-list">
+              <div
+                v-for="task in project.flatTasks"
+                :key="'left-' + task._renderKey"
+                class="task-row"
+                :style="{
+                  height: rowHeight + 'px',
+                  paddingLeft: (task._level * 16) + 'px'
+                }"
+              >
+                <!-- 层级引导线 -->
+                <div
+                  v-if="task._level > 0"
+                  class="level-line"
+                  :style="{
+                    left: (task._level * 16 - 8) + 'px',
+                    height: rowHeight + 'px'
+                  }"
+                ></div>
+
+                <!-- 展开/收起按钮 -->
+                <span
+                  v-if="task._subCount > 0"
+                  class="expand-toggle"
+                  @click.stop="toggleSubtasks(task)"
+                >
+                  {{ expandedTasks.includes(task.id) ? '▼' : '▶' }}
+                </span>
+                <span v-else class="expand-placeholder"></span>
+
+                <!-- 任务名称 -->
+                <span class="task-name" @click="openTask(task)">
+                  {{ task.name }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 右侧任务时间轴 -->
+          <div class="row-right" @wheel.prevent="onRightWheel">
+            <!-- 背景层（用于接收拖拽事件） -->
+            <div
+              class="drag-layer"
+              :style="{ width: totalWidth + 'px', minWidth: totalWidth + 'px' }"
+              @mousedown="startViewDrag"
+            ></div>
+
+            <!-- 背景列（今天标记和选中状态） -->
+            <div class="date-columns" :style="{ width: totalWidth + 'px', minWidth: totalWidth + 'px' }">
+              <div
+                v-for="day in visibleDays"
+                :key="'col-' + day.date"
+                class="date-column"
+                :class="{
+                  'today-column': day.isToday,
+                  'selected-column': selectedDate === day.date
+                }"
+                :style="{ width: dayWidth + 'px', left: (day.index * dayWidth) + 'px' }"
+              />
+            </div>
+
+            <div
+              class="tasks-container"
+              :style="{ width: totalWidth + 'px', minWidth: totalWidth + 'px' }"
+              @mousedown="startViewDrag"
+            >
+
+              <!-- 任务条 -->
+              <div
+                v-for="task in project.flatTasks"
+                :key="task._renderKey"
+                class="task-bar-wrapper"
+                :style="getTaskWrapperStyle(task)"
+              >
+                <!-- 左 resize 手柄 -->
+                <div
+                  class="resize-handle left"
+                  @mousedown.stop="startResize(task,'left',$event)"
+                />
+
+                <!-- 分段任务条 -->
+                <div
+                  v-for="(segment, idx) in getTaskSegments(task)"
+                  :key="`${task.id}-segment-${segment.startDate}-${segment.endDate}`"
+                  class="task-bar-segment"
+                  :class="{
+                    'task-completed': task.complete_at,
+                    'task-overdue': task.overdue && !task.complete_at,
+                    'is-subtask': task._isSubtask
+                  }"
+                  :style="getSegmentStyle(segment)"
+                  @mousedown="startDrag(task,$event)"
+                >
+                  <!-- 子任务展开按钮（仅第一段显示） -->
+                  <span
+                    v-if="idx === 0 && task._subCount > 0"
+                    class="subtask-toggle"
+                    @click.stop="toggleSubtasks(task)"
+                  >
+                    +{{ task._subCount }}
+                  </span>
+
+                  <!-- 任务标题（仅第一段显示） -->
+                  <span v-if="idx === 0" class="task-title" @click.stop="openTask(task)">
+                    {{ task.name }}
+                  </span>
+
+                  <!-- 里程碑名称（最后一天显示） -->
+                  <span v-if="segment.milestone" class="milestone-label">
+                    {{ segment.milestone.name }}
+                  </span>
+                </div>
+
+                <!-- 里程碑分界点（可拖动） -->
+                <div
+                  v-for="(milestone, idx) in getMilestones(task)"
+                  :key="`divider-${idx}`"
+                  class="milestone-divider"
+                  :style="getMilestoneDividerStyle(task, milestone)"
+                  @mousedown.stop="startMilestoneDrag(task, idx, $event)"
+                >
+                  <div class="divider-handle"></div>
+                </div>
+
+                <!-- 右 resize 手柄 -->
+                <div
+                  class="resize-handle right"
+                  @mousedown.stop="startResize(task,'right',$event)"
+                />
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</template>
+
+<script>
+import { mapState } from "vuex"
+
+export default {
+
+  props:{ year:Number },
+
+  data(){
+    return{
+      dayWidth:40,      // 单日宽度
+      rowHeight:60,     // 单行高度
+
+      scrollTop:0,      // 当前垂直滚动
+      scrollLeft:0,     // 当前水平滚动
+
+      expandedTasks: [], // 展开的任务ID数组
+      selectedDate: null, // 选中的日期
+
+      // 拖拽预览状态（避免直接修改 computed 结果）
+      dragPreview: null, // { taskId, startOffset, duration }
+
+      dragTask:null,
+      resizeMode:null,
+      dragStartX:0,
+      originalStart:0,
+      originalEnd:0,
+      originalDuration:0,
+      hasDragged: false, // 标记是否真的发生了拖拽（用于区分点击和拖拽）
+
+      // 里程碑拖拽
+      milestoneDragTask: null,
+      milestoneDragIndex: null,
+      milestoneDragStartX: 0,
+      milestoneOriginalDate: null,
+
+      // 视图拖拽相关
+      isDraggingView: false,
+      viewDragStartX: 0,
+      viewDragStartY: 0,
+      viewScrollStartX: 0,
+      viewScrollStartY: 0,
+      viewDragVelocityX: 0,
+      viewDragVelocityY: 0,
+      viewDragLastX: 0,
+      viewDragLastY: 0,
+      viewDragLastTime: 0,
+      inertiaAnimationId: null,
+
+      syncingScroll: false // 防止滚动循环
+    }
+  },
+
+  computed:{
+
+    ...mapState(['cacheTasks','cacheProjects']),
+
+    // 年起始时间
+    yearStart(){
+      return $A.dayjs(`${this.year}-01-01`).startOf('day')
+    },
+
+    yearEnd(){
+      return $A.dayjs(`${this.year}-12-31`).endOf('day')
+    },
+
+    // 生成全年日期数组（三行：月份、日期、星期）
+    visibleDays(){
+      const arr=[]
+      const total=this.yearEnd.diff(this.yearStart,'day')+1
+      const today=$A.dayjs().format('YYYY-MM-DD')
+      const weekdays = ['日', '一', '二', '三', '四', '五', '六']
+
+      for(let i=0;i<total;i++){
+        const d=this.yearStart.add(i,'day')
+        arr.push({
+          date:d.format('YYYY-MM-DD'),
+          day:d.date(),
+          month:d.month()+1,
+          weekday:weekdays[d.day()],
+          isMonthStart:d.date()===1,
+          isToday:d.format('YYYY-MM-DD')===today,
+          index:i  // 添加索引，避免后续 indexOf
+        })
+      }
+      return arr
+    },
+
+    // 计算每个月的信息（用于合并单元格）
+    monthsInfo(){
+      const months = []
+      let currentMonth = null
+      let dayCount = 0
+      let startIndex = 0
+
+      this.visibleDays.forEach((day, index) => {
+        if(day.month !== currentMonth){
+          if(currentMonth !== null){
+            months.push({
+              month: currentMonth,
+              dayCount: dayCount,
+              startIndex: startIndex,
+              width: dayCount * this.dayWidth
+            })
+          }
+          currentMonth = day.month
+          dayCount = 1
+          startIndex = index
+        }else{
+          dayCount++
+        }
+      })
+
+      // 添加最后一个月
+      if(currentMonth !== null){
+        months.push({
+          month: currentMonth,
+          dayCount: dayCount,
+          startIndex: startIndex,
+          width: dayCount * this.dayWidth
+        })
+      }
+
+      return months
+    },
+
+    // 时间轴总宽度
+    totalWidth(){
+      return this.visibleDays.length*this.dayWidth
+    },
+
+    // =============================
+    // 时间缓存层（避免重复创建 dayjs 对象）
+    // =============================
+    taskTimestampMap(){
+      const map = new Map()
+      this.cacheTasks.forEach(task => {
+        if(!task.start_at || !task.end_at) return
+
+        const start = $A.dayjs(task.start_at)
+        const end = $A.dayjs(task.end_at)
+
+        map.set(task.id, {
+          start: start,
+          end: end,
+          startTs: start.valueOf(),
+          endTs: end.valueOf(),
+          duration: end.diff(start, 'day') + 1
+        })
+      })
+      return map
+    },
+
+    // 第二步优化：拆分为组合层
+
+    // 1️⃣ 有效任务列表（过滤 + 时间范围检查）
+    validTasks(){
+      const result = []
+      this.cacheTasks.forEach(t=>{
+        if(!t.end_at || t.archived_at) return
+
+        const cached = this.taskTimestampMap.get(t.id)
+        if(!cached) return
+
+        // 任务必须与年度范围有交集
+        if(cached.end.isBefore(this.yearStart) || cached.start.isAfter(this.yearEnd)){
+          return
+        }
+
+        result.push(t)
+      })
+      return result
+    },
+
+    // 2️⃣ 父子关系映射（O(1) 查找）
+    childrenMap(){
+      const map = new Map()
+      this.validTasks.forEach(t => {
+        if (!map.has(t.parent_id)) {
+          map.set(t.parent_id, [])
+        }
+        map.get(t.parent_id).push(t)
+      })
+      return map
+    },
+
+    // 3️⃣ 生成项目+任务结构（支持无限层级子任务展开/收起）
+    projects(){
+      const map=new Map()
+
+      // 按项目分组顶层任务（parent_id === 0）
+      const topLevelTasks = this.childrenMap.get(0) || []
+
+      topLevelTasks.forEach(t=>{
+        if(!map.has(t.project_id)){
+          const p=this.cacheProjects.find(x=>x.id==t.project_id)
+          if(!p) return
+          map.set(t.project_id,{
+            id:p.id,
+            name:p.name,
+            tasks:[]
+          })
+        }
+        map.get(t.project_id).tasks.push(t)
+      })
+
+      const result=[]
+      let top=0
+
+      map.forEach(project=>{
+
+        let rowIndex=0
+        const flat=[]
+        const now=$A.dayjs()
+
+        // 递归构建任务树（使用 childrenMap 优化）
+        const buildTaskTree = (parentId, level, parentKey = '') => {
+          const children = this.childrenMap.get(parentId) || []
+
+          children.forEach(task => {
+            // 使用缓存的时间戳
+            const cached = this.taskTimestampMap.get(task.id)
+            if(!cached) return
+
+            const overdue=!task.complete_at && cached.end.isBefore(now,'day')
+            const subCount = (this.childrenMap.get(task.id) || []).length
+            const renderKey = parentKey ? `${parentKey}-${task.id}` : `${task.id}`
+
+            // 根据层级计算任务条高度
+            const baseHeight = this.rowHeight - 16
+            const barHeight = level === 0 ? baseHeight : Math.floor(baseHeight * 0.75)
+
+            // 添加当前任务
+            flat.push({
+              ...task,
+              overdue,
+              _renderKey: renderKey,
+              _rowIndex: rowIndex++,
+              _startOffset: cached.start.diff(this.yearStart,'day'),
+              _duration: cached.duration,
+              _subCount: subCount,
+              _level: level,
+              _isSubtask: level > 0,
+              _barHeight: barHeight
+            })
+
+            // 如果展开，递归添加子任务
+            if(this.expandedTasks.includes(task.id) && subCount > 0){
+              buildTaskTree(task.id, level + 1, renderKey)
+            }
+          })
+        }
+
+        // 处理顶层任务（直接遍历 project.tasks）
+        project.tasks.forEach(topTask => {
+          const cached = this.taskTimestampMap.get(topTask.id)
+          if(!cached) return
+
+          const overdue=!topTask.complete_at && cached.end.isBefore(now,'day')
+          const subCount = (this.childrenMap.get(topTask.id) || []).length
+
+          // 顶层任务使用完整高度
+          const baseHeight = this.rowHeight - 16
+          const barHeight = baseHeight
+
+          flat.push({
+            ...topTask,
+            overdue,
+            _renderKey: `${topTask.id}`,
+            _rowIndex: rowIndex++,
+            _startOffset: cached.start.diff(this.yearStart,'day'),
+            _duration: cached.duration,
+            _subCount: subCount,
+            _level: 0,
+            _isSubtask: false,
+            _barHeight: barHeight
+          })
+
+          // 如果展开，递归添加子任务
+          if(this.expandedTasks.includes(topTask.id) && subCount > 0){
+            buildTaskTree(topTask.id, 1, `${topTask.id}`)
+          }
+        })
+
+        const height=Math.max(rowIndex*this.rowHeight, this.rowHeight)
+
+        result.push({
+          ...project,
+          flatTasks:flat,
+          height,
+          _top:top
+        })
+
+        top+=height
+      })
+
+      return result
+    },
+
+    // 总高度
+    totalHeight(){
+      return this.projects.reduce((a,b)=>a+b.height,0)
+    },
+
+    // 虚拟滚动可视区域
+    visibleProjects(){
+      const buffer=500
+      const viewportHeight = this.$refs.contentScroll?.clientHeight || window.innerHeight
+      const min=this.scrollTop-buffer
+      const max=this.scrollTop+viewportHeight+buffer
+
+      return this.projects.filter(p=>
+        p._top+p.height>min &&
+        p._top<max
+      )
+    }
+
+  },
+
+  mounted(){
+    this.scrollToToday()
+    window.addEventListener('mousemove',this.onMouseMove)
+    window.addEventListener('mouseup',this.stopDrag)
+    window.addEventListener('mouseup',this.stopMilestoneDrag)
+    window.addEventListener('mousemove',this.onViewDragMove)
+    window.addEventListener('mouseup',this.stopViewDrag)
+  },
+
+  beforeDestroy(){
+    window.removeEventListener('mousemove',this.onMouseMove)
+    window.removeEventListener('mouseup',this.stopDrag)
+    window.removeEventListener('mouseup',this.stopMilestoneDrag)
+    window.removeEventListener('mousemove',this.onViewDragMove)
+    window.removeEventListener('mouseup',this.stopViewDrag)
+    if(this.inertiaAnimationId){
+      cancelAnimationFrame(this.inertiaAnimationId)
+    }
+  },
+
+  methods:{
+
+    // 展开/收起子任务
+    toggleSubtasks(task){
+      const index = this.expandedTasks.indexOf(task.id)
+      if(index > -1){
+        // 已展开，收起
+        this.expandedTasks.splice(index, 1)
+      }else{
+        // 未展开，展开
+        this.expandedTasks.push(task.id)
+      }
+    },
+
+    // 选择日期
+    selectDate(date){
+      if(this.selectedDate === date){
+        // 再次点击取消选中
+        this.selectedDate = null
+      }else{
+        this.selectedDate = date
+      }
+    },
+
+    // ==============================
+    // 左侧滚轮：缩放行高
+    // ==============================
+    onLeftWheel(e){
+      const delta=e.deltaY>0?-5:5
+      this.rowHeight=Math.max(40,
+        Math.min(150,this.rowHeight+delta)
+      )
+    },
+
+    // ==============================
+    // 右侧滚轮：缩放时间轴
+    // ==============================
+    onRightWheel(e){
+
+      const container=e.currentTarget
+      const rect=container.getBoundingClientRect()
+
+      // 鼠标在容器中的位置
+      const mouseX=e.clientX-rect.left
+
+      // 当前滚动比例
+      const ratio=(this.$refs.contentScroll.scrollLeft+mouseX)
+        /this.totalWidth
+
+      // 调整日宽度
+      const delta=e.deltaY>0?-2:2
+      this.dayWidth=Math.max(15,
+        Math.min(120,this.dayWidth+delta)
+      )
+
+      // 下一帧更新滚动位置（围绕鼠标缩放）
+      this.$nextTick(()=>{
+        const newScroll=
+          ratio*this.totalWidth-mouseX
+
+        this.$refs.contentScroll.scrollLeft=newScroll
+        this.$refs.headerScroll.scrollLeft=newScroll
+      })
+    },
+
+    // 内容滚动同步到头部
+    onContentScroll(e){
+      if(this.syncingScroll) return
+
+      this.syncingScroll = true
+      this.scrollTop = e.target.scrollTop
+      this.scrollLeft = e.target.scrollLeft
+
+      // 同步 header 的滚动位置
+      if(this.$refs.headerScroll){
+        this.$refs.headerScroll.scrollLeft = e.target.scrollLeft
+      }
+
+      requestAnimationFrame(() => {
+        this.syncingScroll = false
+      })
+    },
+
+    // 滚动到今天
+    scrollToToday(){
+      this.$nextTick(()=>{
+        const today=$A.dayjs().diff(this.yearStart,'day')
+        const scroll=this.$refs.contentScroll
+        if(scroll){
+          const targetScroll = today*this.dayWidth - scroll.clientWidth/2
+          scroll.scrollLeft = Math.max(0, targetScroll)
+        }
+      })
+    },
+
+    // 第三步优化：拖拽预览状态辅助方法
+    // 获取任务的实际偏移和持续时间（考虑拖拽预览）
+    getTaskLayout(task){
+      const layout = {
+        startOffset: task._startOffset,
+        duration: task._duration,
+        leftIndent: task._level * 20
+      }
+
+      if(this.dragPreview && this.dragPreview.taskId === task.id){
+        layout.startOffset = this.dragPreview.startOffset
+        layout.duration = this.dragPreview.duration
+      }
+
+      return layout
+    },
+
+    // 任务样式
+    getTaskStyle(task){
+      // 使用任务的颜色或默认颜色
+      let bgColor=task.color||'#5b8cff'
+      let textColor='#fff'
+
+      if(task.complete_at){
+        bgColor='#d9d9d9'
+        textColor='#999'
+      }else if(task.overdue){
+        bgColor='#ff4d4f'
+      }
+
+      // 使用辅助方法获取布局
+      const layout = this.getTaskLayout(task)
+
+      return{
+        position:'absolute',
+        left:(layout.startOffset*this.dayWidth + layout.leftIndent)+'px',
+        width:(layout.duration*this.dayWidth-4-layout.leftIndent)+'px',
+        top:task._rowIndex*this.rowHeight+8+'px',
+        height:this.rowHeight-16+'px',
+        backgroundColor:bgColor,
+        color:textColor
+      }
+    },
+
+    // 获取任务的里程碑列表
+    getMilestones(task){
+      if(!task.milestones || !Array.isArray(task.milestones)){
+        return []
+      }
+      // 使用缓存的时间戳
+      const cached = this.taskTimestampMap.get(task.id)
+      if(!cached) return []
+
+      const taskStart = cached.start
+      const taskEnd = cached.end
+      return task.milestones
+        .filter(m => {
+          const mDate = $A.dayjs(m.date)
+          return (mDate.isAfter(taskStart) || mDate.isSame(taskStart)) &&
+                 (mDate.isBefore(taskEnd) || mDate.isSame(taskEnd))
+        })
+        .sort((a, b) => $A.dayjs(a.date).diff($A.dayjs(b.date)))
+    },
+
+    // 获取任务分段（根据里程碑分割）
+    getTaskSegments(task){
+      const milestones = this.getMilestones(task)
+
+      // 没有里程碑时，整个任务条使用任务颜色
+      if(milestones.length === 0){
+        return [{
+          startDate: task.start_at,
+          endDate: task.end_at,
+          color: task.final_milestone_color || task.color || '#52c41a',
+          milestone: {
+            name: task.final_milestone_name || 'Final',
+            date: task.end_at,
+            color: task.final_milestone_color || task.color || '#52c41a'
+          },
+          isFinal: true
+        }]
+      }
+
+      const segments = []
+
+      // 第一段：任务开始到第一个里程碑
+      segments.push({
+        startDate: task.start_at,
+        endDate: milestones[0].date,
+        color: milestones[0].color || '#4A90E2',
+        milestone: milestones[0]
+      })
+
+      // 中间段：里程碑之间
+      for(let i = 0; i < milestones.length - 1; i++){
+        const segmentStart = $A.dayjs(milestones[i].date).add(1, 'day')
+        const segmentEnd = $A.dayjs(milestones[i + 1].date)
+
+        if(segmentEnd.isAfter(segmentStart) || segmentEnd.isSame(segmentStart)){
+          segments.push({
+            startDate: segmentStart.format('YYYY-MM-DD'),
+            endDate: milestones[i + 1].date,
+            color: milestones[i + 1].color || '#F5A623',
+            milestone: milestones[i + 1]
+          })
+        }
+      }
+
+      // Final段：最后一个里程碑到任务结束
+      const lastMilestone = milestones[milestones.length - 1]
+      const finalSegmentStart = $A.dayjs(lastMilestone.date).add(1, 'day')
+
+      // 使用缓存的时间戳
+      const cached = this.taskTimestampMap.get(task.id)
+      const taskEnd = cached ? cached.end : $A.dayjs(task.end_at)
+
+      // 只有当最后里程碑不是任务结束日期时才添加Final段
+      if(finalSegmentStart.isBefore(taskEnd) || finalSegmentStart.isSame(taskEnd)){
+        segments.push({
+          startDate: finalSegmentStart.format('YYYY-MM-DD'),
+          endDate: task.end_at,
+          color: task.final_milestone_color || task.color || '#52c41a',
+          milestone: {
+            name: task.final_milestone_name || 'Final',
+            date: task.end_at,
+            color: task.final_milestone_color || task.color || '#52c41a'
+          },
+          isFinal: true
+        })
+      }
+
+      return segments
+    },
+
+    // 获取任务包装器样式
+    getTaskWrapperStyle(task){
+      if(!task.start_at || !task.end_at){
+        return { display:'none' }
+      }
+
+      // 使用辅助方法获取布局
+      const layout = this.getTaskLayout(task)
+
+      // 计算垂直居中偏移
+      const verticalOffset = (this.rowHeight - task._barHeight) / 2
+
+      return{
+        position:'absolute',
+        left:(layout.startOffset*this.dayWidth + layout.leftIndent)+'px',
+        width:(layout.duration*this.dayWidth-4-layout.leftIndent)+'px',
+        top:(task._rowIndex*this.rowHeight + verticalOffset)+'px',
+        height:task._barHeight+'px',
+      }
+    },
+
+    // 获取分段样式
+    getSegmentStyle(segment){
+      const segStart = $A.dayjs(segment.startDate)
+      const segEnd = $A.dayjs(segment.endDate)
+      const duration = segEnd.diff(segStart, 'day') + 1
+
+      return{
+        backgroundColor: segment.color,
+        width: `${duration * this.dayWidth}px`,
+        minWidth: `${duration * this.dayWidth}px`,
+        display: 'inline-flex',
+        height: '100%',
+        position: 'relative'
+      }
+    },
+
+    // 计算里程碑分界点位置
+    getMilestoneDividerStyle(task, milestone){
+      // 使用缓存的时间戳
+      const cached = this.taskTimestampMap.get(task.id)
+      const taskStart = cached ? cached.start : $A.dayjs(task.start_at)
+
+      const milestoneDate = $A.dayjs(milestone.date)
+      const offsetDays = milestoneDate.diff(taskStart, 'day') + 1
+      const leftPx = offsetDays * this.dayWidth
+
+      return {
+        left: `${leftPx}px`,
+        backgroundColor: milestone.color || '#4A90E2'
+      }
+    },
+
+    // 打开任务详情
+    openTask(task){
+      // 如果刚刚发生了拖拽，不打开任务详情
+      if(this.hasDragged){
+        return
+      }
+      this.$store.dispatch("openTask", task)
+    },
+
+    // =============================
+    // 拖拽逻辑
+    // =============================
+    startDrag(task,e){
+      // 阻止事件冒泡到 drag-layer
+      e.stopPropagation()
+
+      // 只阻止子任务展开按钮，允许点击任务标题拖拽
+      if(e.target.closest('.subtask-toggle')){
+        return
+      }
+
+      this.dragTask=task
+      this.resizeMode=null
+      this.dragStartX=e.clientX
+      this.originalStart=task._startOffset
+      this.originalDuration=task._duration
+      this.hasDragged = false // 重置拖拽标记
+
+      // 初始化拖拽预览
+      this.dragPreview = {
+        taskId: task.id,
+        startOffset: task._startOffset,
+        duration: task._duration
+      }
+    },
+
+    startResize(task,mode,e){
+      this.dragTask=task
+      this.resizeMode=mode
+      this.dragStartX=e.clientX
+      this.originalStart=task._startOffset
+      this.originalEnd=task._startOffset+task._duration
+      this.originalDuration=task._duration
+
+      // 初始化拖拽预览
+      this.dragPreview = {
+        taskId: task.id,
+        startOffset: task._startOffset,
+        duration: task._duration
+      }
+    },
+
+    onMouseMove(e){
+      if(this.milestoneDragTask){
+        this.onMilestoneMove(e)
+        return
+      }
+
+      if(!this.dragTask) return
+
+      const dx=e.clientX-this.dragStartX
+      const dayDelta=Math.round(dx/this.dayWidth)
+      const maxDays = this.visibleDays.length
+
+      // 如果鼠标移动超过 5px，标记为真正的拖拽
+      if(Math.abs(dx) > 5){
+        this.hasDragged = true
+      }
+
+      if(this.resizeMode==='left'){
+        const newStart=this.originalStart+dayDelta
+        const diff=this.originalEnd-newStart
+        if(diff>=1 && newStart>=0){
+          this.dragPreview.startOffset=newStart
+          this.dragPreview.duration=diff
+        }
+      }
+      else if(this.resizeMode==='right'){
+        const newEnd=this.originalEnd+dayDelta
+        const diff=newEnd-this.originalStart
+        if(diff>=1 && newEnd<=maxDays){
+          this.dragPreview.duration=diff
+        }
+      }
+      else{
+        // 拖拽移动
+        const newStart = this.originalStart+dayDelta
+        const newEnd = newStart + this.originalDuration
+        if(newStart>=0 && newEnd<=maxDays){
+          this.dragPreview.startOffset = newStart
+        }
+      }
+    },
+
+    stopDrag(){
+      if(!this.dragTask) return
+
+      // 检查位置或大小是否真的改变了
+      const hasChanged =
+        this.dragPreview.startOffset !== this.originalStart ||
+        this.dragPreview.duration !== this.originalDuration
+
+      // 只有真正改变了才发送更新事件
+      if(hasChanged){
+        const newStart=this.yearStart
+          .add(this.dragPreview.startOffset,'day')
+          .format('YYYY-MM-DD')
+
+        const newEnd=this.yearStart
+          .add(
+            this.dragPreview.startOffset+
+            this.dragPreview.duration-1,
+            'day'
+          )
+          .format('YYYY-MM-DD')
+
+        this.$emit('update-task',{
+          id:this.dragTask.id,
+          start_at:newStart,
+          end_at:newEnd
+        })
+      }
+
+      this.dragTask=null
+      this.dragPreview=null
+    },
+
+    // =============================
+    // 里程碑拖拽逻辑
+    // =============================
+    startMilestoneDrag(task, milestoneIndex, e){
+      e.stopPropagation()
+
+      this.milestoneDragTask = task
+      this.milestoneDragIndex = milestoneIndex
+      this.milestoneDragStartX = e.clientX
+
+      const milestone = this.getMilestones(task)[milestoneIndex]
+      this.milestoneOriginalDate = milestone.date
+    },
+
+    onMilestoneMove(e){
+      if(!this.milestoneDragTask) return
+
+      const dx = e.clientX - this.milestoneDragStartX
+      const dayDelta = Math.round(dx / this.dayWidth)
+
+      if(dayDelta === 0) return
+
+      const task = this.milestoneDragTask
+      const milestones = this.getMilestones(task)
+      const milestone = milestones[this.milestoneDragIndex]
+
+      const newDate = $A.dayjs(this.milestoneOriginalDate).add(dayDelta, 'day')
+
+      // 使用缓存的时间戳
+      const cached = this.taskTimestampMap.get(task.id)
+      if(!cached) return
+
+      const taskStart = cached.start
+      const taskEnd = cached.end
+
+      // 检查边界：不能超出任务范围，且不能到达结束日期（Final的位置）
+      if(newDate.isBefore(taskStart) || newDate.isAfter(taskEnd) || newDate.isSame(taskEnd)){
+        return
+      }
+
+      // 检查与相邻里程碑的冲突
+      if(this.milestoneDragIndex > 0){
+        const prevMilestone = milestones[this.milestoneDragIndex - 1]
+        const prevDate = $A.dayjs(prevMilestone.date)
+        if(newDate.isBefore(prevDate) || newDate.isSame(prevDate)){
+          return
+        }
+      }
+      if(this.milestoneDragIndex < milestones.length - 1){
+        const nextMilestone = milestones[this.milestoneDragIndex + 1]
+        const nextDate = $A.dayjs(nextMilestone.date)
+        if(newDate.isAfter(nextDate) || newDate.isSame(nextDate)){
+          return
+        }
+      }
+
+      // 更新里程碑日期（临时预览）
+      milestone.date = newDate.format('YYYY-MM-DD')
+      this.$forceUpdate()
+    },
+
+    stopMilestoneDrag(){
+      if(!this.milestoneDragTask) return
+
+      const task = this.milestoneDragTask
+      const milestones = this.getMilestones(task)
+      const milestone = milestones[this.milestoneDragIndex]
+
+      // 检查日期是否真的改变了
+      if(milestone.date !== this.milestoneOriginalDate){
+        // 更新任务的里程碑数据
+        const updatedMilestones = task.milestones.map(m => {
+          if(m.name === milestone.name && m.date === this.milestoneOriginalDate){
+            return { ...m, date: milestone.date }
+          }
+          return m
+        })
+
+        // 发送更新请求
+        this.$store.dispatch("taskUpdate", {
+          task_id: task.id,
+          milestones: updatedMilestones
+        }).then(() => {
+          $A.messageSuccess('里程碑日期已更新')
+        }).catch(({msg}) => {
+          $A.modalError(msg)
+          // 恢复原始日期
+          milestone.date = this.milestoneOriginalDate
+          this.$forceUpdate()
+        })
+      }
+
+      this.milestoneDragTask = null
+      this.milestoneDragIndex = null
+      this.milestoneOriginalDate = null
+    },
+
+    // =============================
+    // 视图拖拽逻辑（拖拽移动整个视图）
+    // =============================
+    startViewDrag(e){
+      // 如果正在拖任务，禁止视图拖拽
+      if(this.dragTask) return
+
+      // 如果点在任务条上，也不要拖视图
+      if(e.target.closest('.task-bar-wrapper')) return
+      if(e.target.closest('.task-bar-segment')) return
+
+      this.isDraggingView = true
+      this.viewDragStartX = e.clientX
+      this.viewDragStartY = e.clientY
+      this.viewScrollStartX = this.$refs.contentScroll.scrollLeft
+      this.viewScrollStartY = this.$refs.contentScroll.scrollTop
+      this.viewDragLastX = e.clientX
+      this.viewDragLastY = e.clientY
+      this.viewDragLastTime = Date.now()
+      this.viewDragVelocityX = 0
+      this.viewDragVelocityY = 0
+
+      // 取消惯性动画
+      if(this.inertiaAnimationId){
+        cancelAnimationFrame(this.inertiaAnimationId)
+        this.inertiaAnimationId = null
+      }
+
+      // 改变鼠标样式
+      document.body.style.cursor = 'grabbing'
+      document.body.style.userSelect = 'none'
+    },
+
+    onViewDragMove(e){
+      if(!this.isDraggingView) return
+
+      const dx = this.viewDragStartX - e.clientX
+      const dy = this.viewDragStartY - e.clientY
+
+      // 更新滚动位置
+      this.$refs.contentScroll.scrollLeft = this.viewScrollStartX + dx
+      this.$refs.contentScroll.scrollTop = this.viewScrollStartY + dy
+
+      // 计算速度（用于惯性滚动）
+      const now = Date.now()
+      const dt = now - this.viewDragLastTime
+      if(dt > 0){
+        this.viewDragVelocityX = (e.clientX - this.viewDragLastX) / dt * 16 // 转换为每帧速度
+        this.viewDragVelocityY = (e.clientY - this.viewDragLastY) / dt * 16
+      }
+
+      this.viewDragLastX = e.clientX
+      this.viewDragLastY = e.clientY
+      this.viewDragLastTime = now
+    },
+
+    stopViewDrag(){
+      if(!this.isDraggingView) return
+
+      this.isDraggingView = false
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+
+      // 启动惯性滚动
+      const velocityThreshold = 0.5
+      if(Math.abs(this.viewDragVelocityX) > velocityThreshold ||
+         Math.abs(this.viewDragVelocityY) > velocityThreshold){
+        this.startInertiaScroll()
+      }
+    },
+
+    startInertiaScroll(){
+      const friction = 0.95 // 摩擦系数，越小停得越快
+      const minVelocity = 0.1 // 最小速度阈值
+
+      const animate = () => {
+        const el = this.$refs.contentScroll
+        if(!el) return
+
+        // 计算边界
+        const maxX = el.scrollWidth - el.clientWidth
+        const maxY = el.scrollHeight - el.clientHeight
+
+        // 应用速度并限制边界
+        const newScrollLeft = el.scrollLeft - this.viewDragVelocityX
+        const newScrollTop = el.scrollTop - this.viewDragVelocityY
+
+        el.scrollLeft = Math.max(0, Math.min(maxX, newScrollLeft))
+        el.scrollTop = Math.max(0, Math.min(maxY, newScrollTop))
+
+        // 如果到达边界，停止该方向的速度
+        if(el.scrollLeft === 0 || el.scrollLeft === maxX){
+          this.viewDragVelocityX = 0
+        }
+        if(el.scrollTop === 0 || el.scrollTop === maxY){
+          this.viewDragVelocityY = 0
+        }
+
+        // 应用摩擦力
+        this.viewDragVelocityX *= friction
+        this.viewDragVelocityY *= friction
+
+        // 检查是否应该停止
+        if(Math.abs(this.viewDragVelocityX) > minVelocity ||
+           Math.abs(this.viewDragVelocityY) > minVelocity){
+          this.inertiaAnimationId = requestAnimationFrame(animate)
+        }else{
+          this.inertiaAnimationId = null
+        }
+      }
+
+      this.inertiaAnimationId = requestAnimationFrame(animate)
+    }
+
+  }
+
+}
+</script>
+
+<style scoped>
+.calendar-year-view{
+  height:100%;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+
+.year-header{
+  height:90px;
+  display:flex;
+  border-bottom:1px solid #ddd;
+  flex-shrink:0;
+}
+
+.header-left{
+  width:250px;
+  flex-shrink:0;
+  border-right:1px solid #ddd;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-weight:bold;
+  background:#fafafa;
+}
+
+.header-right{
+  flex:1;
+  overflow:hidden;
+  position:relative;
+}
+
+.dates-scroll{
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+  height:100%;
+  width:100%;
+  position:relative;
+}
+
+.dates-scroll::-webkit-scrollbar{
+  display:none;
+}
+
+.date-row{
+  display:flex;
+  flex:1;
+  border-bottom:1px solid #eee;
+}
+
+.date-row:last-child{
+  border-bottom:none;
+}
+
+.date-cell{
+  flex-shrink:0;
+  border-right:1px solid #eee;
+  text-align:center;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  position:relative;
+  min-width:15px;
+  cursor:pointer;
+  transition:background-color 0.2s;
+}
+
+.date-cell:hover{
+  background:#f5f5f5;
+}
+
+.date-cell.month-start{
+  border-left:2px solid #1890ff;
+}
+
+.date-cell.today{
+  background:#e6f7ff;
+  font-weight:bold;
+}
+
+.date-cell.selected{
+  background:#bae7ff;
+}
+
+.month-row .date-cell{
+  font-size:12px;
+  color:#1890ff;
+  font-weight:bold;
+  border-right:2px solid #1890ff;
+}
+
+.month-row .date-cell:last-child{
+  border-right:1px solid #eee;
+}
+
+.month-cell{
+  cursor:default !important;
+}
+
+.month-cell:hover{
+  background:transparent !important;
+}
+
+.day-row .date-cell{
+  font-size:14px;
+  font-weight:bold;
+}
+
+.week-row .date-cell{
+  font-size:10px;
+  color:#999;
+}
+
+.year-content{
+  flex:1;
+  overflow:auto;
+  position:relative;
+}
+
+.year-content::-webkit-scrollbar{
+  width:8px;
+  height:8px;
+}
+
+.year-content::-webkit-scrollbar-thumb{
+  background:#ccc;
+  border-radius:4px;
+}
+
+.project-row{
+  position:absolute;
+  left:0;
+  right:0;
+  display:flex;
+}
+
+.project-row-even .row-left{
+  background:#f9f9f9;
+}
+
+.project-row-even .row-right{
+  background:#fafafa;
+}
+
+.row-left{
+  width:250px;
+  flex-shrink:0;
+  background:#fafafa;
+  border-right:1px solid #ddd;
+  border-bottom:2px solid #e0e0e0;
+  position:sticky;
+  left:0;
+  z-index:10;
+  overflow:hidden;
+  display:flex;
+  flex-direction:column;
+}
+
+.project-name-header{
+  padding:8px;
+  font-weight:bold;
+  border-bottom:1px solid #e0e0e0;
+  background:#f0f0f0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.task-list{
+  flex:1;
+  overflow:hidden;
+}
+
+.task-row{
+  position:relative;
+  display:flex;
+  align-items:center;
+  border-bottom:1px solid #f0f0f0;
+  cursor:pointer;
+  transition:background-color 0.2s;
+}
+
+.task-row:hover{
+  background:#f5f5f5;
+}
+
+.level-line{
+  position:absolute;
+  width:1px;
+  background:#d0d0d0;
+  top:0;
+}
+
+.expand-toggle{
+  width:16px;
+  height:16px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  user-select:none;
+  font-size:10px;
+  color:#666;
+  margin-right:4px;
+  flex-shrink:0;
+}
+
+.expand-toggle:hover{
+  color:#1890ff;
+}
+
+.expand-placeholder{
+  width:16px;
+  height:16px;
+  display:inline-block;
+  margin-right:4px;
+  flex-shrink:0;
+}
+
+.task-name{
+  flex:1;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:13px;
+  padding-right:8px;
+}
+
+.row-right{
+  flex:1;
+  position:relative;
+  overflow:hidden;
+  border-bottom:2px solid #e0e0e0;
+}
+
+.drag-layer{
+  position:absolute;
+  top:0;
+  left:0;
+  height:100%;
+  z-index:0;
+  cursor:grab;
+}
+
+.drag-layer:active{
+  cursor:grabbing;
+}
+
+.date-columns{
+  position:absolute;
+  top:0;
+  left:0;
+  height:100%;
+  pointer-events:none;
+  z-index:1;
+}
+
+.date-column{
+  position:absolute;
+  top:0;
+  height:100%;
+  border-right:1px solid #f0f0f0;
+}
+
+.date-column.today-column{
+  background:rgba(24,144,255,0.05);
+  border-right:1px solid rgba(24,144,255,0.2);
+}
+
+.date-column.selected-column{
+  background:rgba(24,144,255,0.1);
+  border-right:1px solid rgba(24,144,255,0.3);
+}
+
+.tasks-container{
+  position:relative;
+  height:100%;
+  z-index:2;
+}
+
+/* 任务条包装器 */
+.task-bar-wrapper{
+  position:absolute;
+  display:flex;
+  align-items:stretch;
+  cursor:grab;
+  transition:opacity 0.2s;
+}
+
+.task-bar-wrapper:active{
+  cursor:grabbing;
+}
+
+.task-bar-wrapper:hover{
+  opacity:0.9;
+  box-shadow:0 2px 8px rgba(0,0,0,0.15);
+  z-index:5;
+}
+
+/* 任务条分段 */
+.task-bar-segment{
+  border-radius:4px;
+  display:inline-flex;
+  align-items:center;
+  padding:0 6px;
+  overflow:hidden;
+  white-space:nowrap;
+  position:relative;
+  border-right:1px solid rgba(255,255,255,0.3);
+}
+
+.task-bar-segment:first-child{
+  border-top-left-radius:4px;
+  border-bottom-left-radius:4px;
+}
+
+.task-bar-segment:last-child{
+  border-top-right-radius:4px;
+  border-bottom-right-radius:4px;
+  border-right:none;
+}
+
+.task-bar-segment.is-subtask{
+  opacity:0.8;
+  font-size:11px;
+  border-left:3px solid rgba(0,0,0,0.2);
+}
+
+.task-bar-segment.task-completed{
+  opacity:0.6;
+  text-decoration:line-through;
+}
+
+.task-bar-segment.task-overdue{
+  animation:pulse 2s infinite;
+}
+
+@keyframes pulse{
+  0%,100%{opacity:1}
+  50%{opacity:0.7}
+}
+
+.subtask-toggle{
+  background:rgba(0,0,0,0.2);
+  border-radius:3px;
+  padding:2px 6px;
+  font-size:10px;
+  margin-right:6px;
+  cursor:pointer;
+  flex-shrink:0;
+}
+
+.subtask-toggle:hover{
+  background:rgba(0,0,0,0.3);
+}
+
+.task-title{
+  flex:1;
+  font-size:12px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  cursor:pointer;
+  color:#fff;
+}
+
+.milestone-label{
+  font-size:10px;
+  font-weight:600;
+  color:#fff;
+  text-shadow:0 1px 2px rgba(0,0,0,0.3);
+  margin-left:auto;
+  padding-left:6px;
+  flex-shrink:0;
+}
+
+.resize-handle{
+  width:6px;
+  height:100%;
+  position:absolute;
+  top:0;
+  cursor:ew-resize;
+  z-index:10;
+}
+
+.resize-handle.left{
+  left:0;
+}
+
+.resize-handle.right{
+  right:0;
+}
+
+/* 里程碑分界点 */
+.milestone-divider{
+  position:absolute;
+  top:0;
+  bottom:0;
+  width:4px;
+  cursor:ew-resize;
+  z-index:8;
+  transform:translateX(-2px);
+  transition:width 0.2s, transform 0.2s;
+}
+
+.milestone-divider:hover{
+  width:8px;
+  transform:translateX(-4px);
+}
+
+.divider-handle{
+  width:100%;
+  height:100%;
+  background:rgba(255,255,255,0.9);
+  box-shadow:0 0 4px rgba(0,0,0,0.4);
+  border-radius:2px;
+  position:relative;
+}
+
+.divider-handle::before{
+  content:'';
+  position:absolute;
+  top:50%;
+  left:50%;
+  transform:translate(-50%, -50%);
+  width:2px;
+  height:60%;
+  background:rgba(0,0,0,0.3);
+}
+
+.milestone-divider:hover .divider-handle{
+  background:rgba(255,255,255,1);
+  box-shadow:0 0 8px rgba(0,0,0,0.5);
+}
+
+/* 移除旧的里程碑标记样式 */
+</style>

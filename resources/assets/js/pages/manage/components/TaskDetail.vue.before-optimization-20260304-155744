@@ -1,0 +1,3165 @@
+<template>
+    <!--子任务-->
+    <div v-if="ready && isSubTask" class="subtask-wrapper">
+        <li class="subtask-item">
+            <div
+                class="subtask-icon"
+                :style="getFlowStatusStyle(taskDetail)">
+                <TaskMenu
+                    :ref="`taskMenu_${taskDetail.id}`"
+                    :disabled="taskId === 0"
+                    :task="taskDetail"
+                    :load-status="taskDetail.loading === true"
+                    @on-update="getLogLists"/>
+            </div>
+            <div class="subtask-name">
+                <Input
+                    v-if="subtaskNameEditing"
+                    v-model="taskDetail.name"
+                    ref="subtaskNameInput"
+                    type="text"
+                    :maxlength="255"
+                    enterkeyhint="done"
+                    @on-blur="finishEditSubtaskName"
+                    @on-keydown="onNameKeydown"
+                />
+                <div
+                    v-else
+                    class="subtask-name-button"
+                    @click="handleSubtaskNameClick"
+                    @dblclick.stop="startEditSubtaskName">
+                    {{ taskDetail.name }}
+                </div>
+            </div>
+            <DatePicker
+                v-model="timeValue"
+                :open="timeOpen"
+                :options="timeOptions"
+                format="yyyy/MM/dd HH:mm"
+                type="datetimerange"
+                class="subtask-time"
+                placement="bottom-end"
+                @on-open-change="timeChange"
+                @on-change="taskTimeChange"
+                @on-clear="timeClear"
+                @on-ok="timeOk"
+                transfer>
+                <div v-if="showSubTime" @click="openTime" :class="['time', taskDetail.today ? 'today' : '', taskDetail.overdue ? 'overdue' : '']">
+                    {{expiresFormat(taskDetail.end_at)}}
+                </div>
+                <Icon v-else class="clock" type="ios-clock-outline" @click="openTime" />
+            </DatePicker>
+            <UserSelect
+                class="subtask-avatar"
+                v-model="ownerData.owner_userid"
+                :multiple-max="10"
+                :avatar-size="20"
+                :title="$L('修改负责人')"
+                :add-icon="false"
+                :project-id="taskDetail.project_id"
+                :before-submit="onOwner"/>
+            <!-- 添加子任务按钮 -->
+            <div v-if="!taskDetail.complete_at" class="subtask-add-child-btn" @click.stop="toggleSubTaskInput">
+                <Icon :type="subTaskInputVisible ? 'md-remove' : 'md-add'" size="16"/>
+            </div>
+        </li>
+        <!-- 子任务的子任务列表 -->
+        <ul v-if="mySubList.length > 0 || subTaskInputVisible" class="nested-subtask-list">
+            <TaskDetail
+                v-for="(task, key) in mySubList"
+                :ref="`subTask_${task.id}`"
+                :key="key"
+                :task-id="task.id"
+                :open-task="task"
+                :main-end-at="taskDetail.end_at"
+                :can-update-blur="canUpdateBlur"/>
+            <!-- 添加子任务输入框 -->
+            <li v-if="subTaskInputVisible" class="nested-subtask-add">
+                <Input
+                    v-model="subTaskInputName"
+                    :ref="`subTaskInput_${taskDetail.id}`"
+                    class="add-input"
+                    :placeholder="$L('+ 输入子任务，回车添加子任务')"
+                    :icon="subTaskInputLoading ? 'ios-loading' : ''"
+                    :class="{loading: subTaskInputLoading}"
+                    enterkeyhint="done"
+                    @on-blur="onSubTaskInputBlur"
+                    @on-keydown="onSubTaskInputKeydown"/>
+            </li>
+        </ul>
+    </div>
+    <!--主任务-->
+    <div
+        v-else-if="ready"
+        class="task-detail"
+        :class="taskDetailClass"
+        :style="taskDetailStyle">
+        <div v-show="taskDetail.id > 0" class="task-info" v-resize-observer="scrollIntoInput">
+            <div class="head">
+                <TaskMenu
+                    :ref="`taskMenu_${taskDetail.id}`"
+                    :disabled="taskId === 0"
+                    :task="taskDetail"
+                    class="icon"
+                    size="medium"
+                    :color-show="false"
+                    @on-update="getLogLists"/>
+                <div
+                    v-if="taskDetail.flow_item_name"
+                    class="flow"
+                    :style="$A.generateColorVarStyle(taskDetail.flow_item_color, [10], 'flow-item-custom-color')">
+                    <span :class="taskDetail.flow_item_status" @click.stop="openMenu($event, taskDetail)">{{taskDetail.flow_item_name}}</span>
+                </div>
+                <div v-if="taskDetail.archived_at" class="flow">
+                    <span class="archived" @click.stop="openMenu($event, taskDetail)">{{$L('已归档')}}</span>
+                </div>
+                <div class="nav user-select-auto">
+                    <p v-if="projectName"><span>{{projectName}}</span></p>
+                    <p v-if="columnName"><span>{{columnName}}</span></p>
+                    <p v-if="taskDetail.id"><span>{{taskDetail.id}}</span></p>
+                </div>
+                <div class="function">
+                    <ETooltip v-if="$Electron" :disabled="$isEEUIApp || windowTouch" :content="$L('独立窗口显示')">
+                        <i class="taskfont open" @click="openNewWin">&#xe776;</i>
+                    </ETooltip>
+                    <div class="menu">
+                        <TaskMenu
+                            :disabled="taskId === 0"
+                            :task="taskDetail"
+                            icon="ios-more"
+                            completed-icon="ios-more"
+                            size="medium"
+                            :color-show="false"
+                            :show-load="false"
+                            @on-update="getLogLists"/>
+                    </div>
+                </div>
+            </div>
+            <Scrollbar ref="scroller" class="scroller" :touch-content-blur="false">
+                <Alert v-if="taskDetail.task_user !== undefined && getOwner.length === 0" class="receive-box" type="warning">
+                    <span class="receive-text">{{$L('该任务尚未被领取，点击这里')}}</span>
+                    <EPopover
+                        v-model="receiveShow"
+                        class="receive-button"
+                        placement="bottom">
+                        <div class="task-detail-receive">
+                            <div class="receive-title">
+                                <Icon type="ios-help-circle"/>
+                                {{$L('确认计划时间领取任务')}}
+                            </div>
+                            <div class="receive-time">
+                                <DatePicker
+                                    v-model="timeValue"
+                                    :options="timeOptions"
+                                    format="yyyy/MM/dd HH:mm"
+                                    type="datetimerange"
+                                    :placeholder="$L('请设置计划时间')"
+                                    :clearable="false"
+                                    :editable="false"
+                                    @on-change="taskTimeChange"/>
+                            </div>
+                            <div class="receive-bottom">
+                                <Button size="small" type="text" @click="receiveShow=false">{{$L('取消')}}</Button>
+                                <Button :loading="ownerLoad > 0" size="small" type="primary" @click="onOwner(true)">{{$L('确定')}}</Button>
+                            </div>
+                        </div>
+                        <Button slot="reference" :loading="ownerLoad > 0" size="small" type="primary">{{$L('领取任务')}}</Button>
+                    </EPopover>
+                </Alert>
+                <!-- 面包屑导航 -->
+                <div v-if="taskBreadcrumbs.length > 1" class="task-breadcrumbs">
+                    <span
+                        v-for="(crumb, index) in taskBreadcrumbs"
+                        :key="crumb.id"
+                        class="breadcrumb-item">
+                        <span
+                            v-if="!crumb.isCurrent"
+                            class="breadcrumb-link"
+                            @click="navigateToTask(crumb.id)">
+                            {{ crumb.name }}
+                        </span>
+                        <span v-else class="breadcrumb-current">
+                            {{ crumb.name }}
+                        </span>
+                        <i v-if="index < taskBreadcrumbs.length - 1" class="taskfont breadcrumb-arrow">&#xe676;</i>
+                    </span>
+                </div>
+                <div class="title">
+                    <Input
+                        v-model="taskDetail.name"
+                        ref="name"
+                        type="textarea"
+                        :rows="1"
+                        :autosize="{ minRows: 1, maxRows: 8 }"
+                        :maxlength="255"
+                        enterkeyhint="done"
+                        @on-blur="updateBlur('name')"
+                        @on-keydown="onNameKeydown"/>
+                </div>
+                <TEditorTask
+                    ref="desc"
+                    class="desc"
+                    :value="taskContent"
+                    :placeholder="$L('详细描述...')"
+                    @on-history="onHistory"
+                    @on-blur="updateBlur('content', $event)"/>
+                <Form class="items" label-position="left" label-width="auto" @submit.native.prevent>
+                    <FormItem v-if="getTag.length > 0 || tagForce">
+                        <div class="item-label" slot="label">
+                            <i class="taskfont">&#xe61e;</i>{{$L('标签')}}
+                        </div>
+                        <div class="item-content tags">
+                            <EPopover v-model="tagShow" class="tags-select" placement="bottom">
+                                <TaskTagSelect
+                                    ref="tagSelect"
+                                    v-model="tagValue"
+                                    :data-sources="tagData"
+                                    :loading="tagLoad > 0"
+                                    :max="10"
+                                    @add="onTagAdd"/>
+                                <div slot="reference">
+                                    <TaskTag :tags="getTag">
+                                        <li v-if="getTag.length === 0" slot="end" class="add-icon"></li>
+                                    </TaskTag>
+                                </div>
+                            </EPopover>
+                        </div>
+                    </FormItem>
+                    <FormItem v-if="getOwner.length > 0">
+                        <div class="item-label" slot="label">
+                            <i class="taskfont">&#xe6e4;</i>{{$L('负责人')}}
+                        </div>
+                        <UserSelect
+                            class="item-content user"
+                            v-model="ownerData.owner_userid"
+                            :multiple-max="10"
+                            :avatar-size="28"
+                            :title="$L('修改负责人')"
+                            :project-id="taskDetail.project_id"
+                            :add-icon="false"
+                            :before-submit="onOwner"/>
+                    </FormItem>
+                    <FormItem v-if="getAssist.length > 0 || assistForce">
+                        <div class="item-label" slot="label">
+                            <i class="taskfont">&#xe63f;</i>{{$L('协助人员')}}
+                        </div>
+                        <UserSelect
+                            ref="assist"
+                            class="item-content user"
+                            v-model="assistData.assist_userid"
+                            :multiple-max="10"
+                            :avatar-size="28"
+                            :title="$L(getAssist.length > 0 ? '修改协助人员' : '添加协助人员')"
+                            :project-id="taskDetail.project_id"
+                            :disabled-choice="assistData.disabled"
+                            :add-icon="false"
+                            :before-submit="onAssist"/>
+                    </FormItem>
+                    <FormItem v-if="taskDetail.visibility > 1 || visibleForce || visibleKeep">
+                        <div class="item-label" slot="label">
+                            <i class="taskfont">&#xe77b;</i>
+                            <span class="visibility-text color" @click="showCisibleDropdown">{{$L('可见性')}} <i class="taskfont">&#xe740;</i></span>
+                        </div>
+                        <div class="item-content user">
+                            <span v-if="taskDetail.visibility == 1 || taskDetail.visibility == 2" ref="visibilityText" class="visibility-text" @click="showCisibleDropdown">{{ taskDetail.visibility == 1 ? $L('项目人员可见') : $L('任务人员可见') }}</span>
+                            <UserSelect v-else
+                                ref="visibleUserSelectRef"
+                                v-model="taskDetail.visibility_appointor"
+                                :avatar-size="28"
+                                :title="$L('选择指定人员')"
+                                :project-id="taskDetail.project_id"
+                                :add-icon="false"
+                                @on-show-change="visibleUserSelectShowChange"/>
+                        </div>
+                    </FormItem>
+                    <FormItem v-if="taskDetail.end_at || timeForce">
+                        <div class="item-label" slot="label">
+                            <i class="taskfont">&#xe6e8;</i>
+                            <span v-if="!taskDetail.end_at" @click="timeOpen = true" class="visibility-text color">{{$L('截止时间')}}</span>
+                            <span v-else class="visibility-text color" @click="showAtDropdown">{{$L('截止时间')}}</span>
+                        </div>
+                        <ul class="item-content">
+                            <li>
+                                <DatePicker
+                                    disabled
+                                    v-model="timeValue"
+                                    :open="timeOpen"
+                                    :options="timeOptions"
+                                    format="yyyy/MM/dd HH:mm"
+                                    type="datetimerange"
+                                    @on-open-change="timeChange"
+                                    @on-change="taskTimeChange"
+                                    @on-clear="timeClear"
+                                    @on-ok="timeOk"
+                                    transfer>
+                                    <div class="picker-time">
+                                        <div v-if="!taskDetail.end_at" @click="timeOpen = true" class="time">{{taskDetail.end_at ? cutTime : '--'}}</div>
+                                        <div v-else @click="showAtDropdown" class="time">{{taskDetail.end_at ? cutTime : '--'}}</div>
+                                        <template v-if="!taskDetail.complete_at && taskDetail.end_at">
+                                            <Tag v-if="within24Hours(taskDetail.end_at)" :color="tagColor(taskDetail)" @on-click="showAtDropdown">
+                                                <i class="taskfont">&#xe71d;</i>{{expiresFormat(taskDetail.end_at)}}
+                                            </Tag>
+                                            <Tag v-if="taskDetail.overdue" color="red" @on-click="showAtDropdown">{{$L('超期未完成')}}</Tag>
+                                        </template>
+                                        <TaskPriority v-if="taskDetail.p_name" :backgroundColor="taskDetail.p_color" style="margin-left: 8px;">
+                                            <span ref="priorityText" @click="onPriority">{{taskDetail.p_name}}</span>
+                                        </TaskPriority>
+                                    </div>
+                                </DatePicker>
+                            </li>
+                        </ul>
+                    </FormItem>
+                    <FormItem v-if="(taskDetail.loop && taskDetail.loop != 'never') || loopForce">
+                        <div class="item-label" slot="label">
+                            <i class="taskfont">&#xe93f;</i>{{$L('重复周期')}}
+                        </div>
+                        <ul class="item-content loop">
+                            <li>
+                                <ETooltip :disabled="$isEEUIApp || windowTouch || !taskDetail.loop_at" :content="`${$L('下个周期')}: ${taskDetail.loop_at}`" placement="right">
+                                    <span ref="loopText" @click="onLoop">{{$L(loopLabel(taskDetail.loop))}}</span>
+                                </ETooltip>
+                            </li>
+                        </ul>
+                    </FormItem>
+                    <FormItem v-if="taskDetail.start_at && taskDetail.end_at">
+                        <div class="item-label" slot="label">
+                            <i class="taskfont">&#xe71d;</i>{{$L('里程碑')}}
+                        </div>
+                        <ul class="item-content milestones">
+                            <li v-for="(milestone, idx) in milestoneList" :key="`milestone-${idx}`" class="milestone-item">
+                                <Input
+                                    v-model="milestone.name"
+                                    :placeholder="$L('里程碑名称')"
+                                    size="small"
+                                    style="width: 150px; margin-right: 8px;"
+                                    @on-blur="checkAndUpdateMilestone(idx)"/>
+                                <DatePicker
+                                    :value="milestone.date"
+                                    type="date"
+                                    format="yyyy-MM-dd"
+                                    :placeholder="$L('日期')"
+                                    size="small"
+                                    style="width: 130px; margin-right: 8px;"
+                                    @on-change="date => handleDateChange(idx, date)"/>
+                                <ColorPicker
+                                    v-model="milestone.color"
+                                    size="small"
+                                    :recommend="false"
+                                    @on-change="color => setMilestoneColor(idx, color)"/>
+                                <Icon
+                                    type="md-close-circle"
+                                    size="18"
+                                    style="cursor: pointer; color: #999; margin-left: 8px;"
+                                    @click="removeMilestone(idx)"/>
+                            </li>
+                            <!-- Final 里程碑 -->
+                            <li class="milestone-item milestone-final">
+                                <Input
+                                    v-model="finalMilestone.name"
+                                    :placeholder="$L('Final 阶段名称')"
+                                    size="small"
+                                    style="width: 150px; margin-right: 8px;"
+                                    @on-blur="updateFinalMilestone"/>
+                                <Input
+                                    :value="taskDetail.end_at ? $A.dayjs(taskDetail.end_at).format('YYYY-MM-DD') : '--'"
+                                    disabled
+                                    size="small"
+                                    style="width: 130px; margin-right: 8px;"/>
+                                <ColorPicker
+                                    v-model="finalMilestone.color"
+                                    size="small"
+                                    :recommend="false"
+                                    @on-change="updateFinalMilestone"/>
+                                <span style="display: inline-block; width: 18px; margin-left: 8px;"></span>
+                            </li>
+                            <li class="milestone-actions">
+                                <Button size="small" icon="md-add" @click="addMilestone">{{$L('添加里程碑')}}</Button>
+                                <Button size="small" @click="showBatchCreateModal">{{$L('批量创建')}}</Button>
+                            </li>
+                        </ul>
+                    </FormItem>
+                    <FormItem v-if="fileList.length > 0">
+                        <div class="item-label" slot="label">
+                            <i class="taskfont">&#xe6e6;</i>{{$L('附件')}}
+                        </div>
+                        <ul class="item-content file">
+                            <li v-if="taskDetail.file_num > 50" class="tip">{{$L(`共${taskDetail.file_num}个文件，仅显示最新50个`)}}</li>
+                            <li v-for="(file, index) in fileList" :key="index" @click="showFileDropdown(file, $event)">
+                                <img v-if="file.id" class="file-ext" :src="file.thumb"/>
+                                <Loading v-else class="file-load"/>
+                                <div class="file-name">{{file.name}}</div>
+                                <div class="file-size">{{$A.bytesToSize(file.size)}}</div>
+                            </li>
+                        </ul>
+                        <ul class="item-content file-up">
+                            <li>
+                                <div class="add-button" @click="onUploadClick(true)">
+                                    <i class="taskfont">&#xe6f2;</i>
+                                    <span>{{$L('添加附件')}}</span>
+                                </div>
+                            </li>
+                        </ul>
+                    </FormItem>
+                    <FormItem v-if="subList.length > 0 || addsubForce" className="item-subtask">
+                        <div class="item-label" slot="label">
+                            <i class="taskfont">&#xe6f0;</i>{{$L('子任务')}}
+                        </div>
+                        <ul v-if="subList.length > 0" class="item-content subtask">
+                            <TaskDetail
+                                v-for="(task, key) in subList"
+                                :ref="`subTask_${task.id}`"
+                                :key="key"
+                                :task-id="task.id"
+                                :open-task="task"
+                                :main-end-at="taskDetail.end_at"
+                                :can-update-blur="canUpdateBlur"/>
+                        </ul>
+                        <ul class="item-content subtask-add">
+                            <li>
+                                <Input
+                                    v-if="addsubShow"
+                                    v-model="addsubName"
+                                    ref="addsub"
+                                    class="add-input"
+                                    :placeholder="$L('+ 输入子任务，回车添加子任务')"
+                                    :icon="addsubLoad > 0 ? 'ios-loading' : ''"
+                                    :class="{loading: addsubLoad > 0}"
+                                    enterkeyhint="done"
+                                    @on-blur="addsubChackClose"
+                                    @on-keydown="addsubKeydown"/>
+                                <div v-else class="add-button" @click="addsubOpen">
+                                    <i class="taskfont">&#xe6f2;</i>
+                                    <span>{{$L('添加子任务')}}</span>
+                                </div>
+                                <Button
+                                    v-if="!addsubShow"
+                                    size="small"
+                                    style="margin-left: 8px;"
+                                    @click="showBatchCreateSubtaskModal">{{$L('批量创建')}}</Button>
+                            </li>
+                        </ul>
+                    </FormItem>
+                    <FormItem v-if="relatedTasks.length > 0" className="item-related-task">
+                        <div class="item-label" slot="label">
+                            <i class="taskfont">&#xe7d6;</i>{{$L('关联任务')}}
+                        </div>
+                        <ul class="item-content related-task">
+                            <li
+                                v-for="item in relatedTasks"
+                                :key="item.related_task_id"
+                                class="related-item"
+                                @click="openRelatedTask(item)">
+                                <span class="related-direction" :class="{
+                                    inbound: item.mentioned_by,
+                                    outbound: item.mention,
+                                    mutual: item.mention && item.mentioned_by
+                                }">
+                                    <Icon v-if="item.mention && item.mentioned_by" type="md-swap"/>
+                                    <Icon v-else-if="item.mentioned_by" type="md-arrow-round-back"/>
+                                    <Icon v-else type="md-arrow-round-forward"/>
+                                </span>
+                                <span class="related-main">
+                                    <span class="related-id">#{{item.related_task_id}}</span>
+                                    <span class="related-title">{{item.task.name}}</span>
+                                </span>
+                                <span v-if="item.task.project_name && item.task.project_id != taskDetail.project_id" class="related-project">{{item.task.project_name}}</span>
+                                <span v-if="item.task.column_name" class="related-column">{{item.task.column_name}}</span>
+                                <span
+                                    v-if="item.task.flow_item_name"
+                                    class="related-status"
+                                    :class="item.task.flow_item_status"
+                                    :style="$A.generateColorVarStyle(item.task.flow_item_color, [10], 'flow-item-custom-color')">
+                                    {{item.task.flow_item_name}}
+                                </span>
+                                <span
+                                    v-else-if="item.task.complete_at"
+                                    class="related-status end">
+                                    {{$L('已完成')}}
+                                </span>
+                                <span
+                                    v-else-if="item.task.archived_at"
+                                    class="related-status archived">
+                                    {{$L('已归档')}}
+                                </span>
+                            </li>
+                        </ul>
+                    </FormItem>
+                </Form>
+                <div v-if="menuList.length > 0" class="add">
+                    <div class="add-wrap">
+                        <div class="add-button" @click="onAddItem">
+                            <i class="taskfont">&#xe6f2;</i>
+                            <span>{{$L('添加')}}</span>
+                            <em>{{menuText}}</em>
+                        </div>
+                    </div>
+                </div>
+            </Scrollbar>
+            <TaskUpload ref="upload" class="upload" @on-select-file="onSelectFile"/>
+        </div>
+        <div
+            v-show="taskDetail.id > 0"
+            ref="taskDialog"
+            class="task-dialog"
+            :style="dialogStyle">
+            <template v-if="hasOpenDialog">
+                <ResizeLine
+                    class="task-resize"
+                    placement="right"
+                    v-model="taskDialogWidth"
+                    :min="300"
+                    :max="900"
+                    :reverse="true"/>
+                <DialogWrapper
+                    v-if="taskId > 0"
+                    ref="dialog"
+                    :dialog-id="taskDetail.dialog_id"
+                    @on-type-change="onTypeChange">
+                    <div slot="head" class="head">
+                        <Icon class="icon" type="ios-chatbubbles-outline" />
+                        <div class="nav">
+                            <div class="nav-item nav-chat" :class="{active:navActive=='dialog'}" @click="navActive='dialog'">
+                                {{$L('讨论')}}
+                                <span v-if="msgTypes.length > 1" class="msg-type" @click.stop="openTypeClick">
+                                    <i class="taskfont">&#xe740;</i>
+                                    <em v-if="msgType">{{getTypeLabel(msgType)}}</em>
+                                </span>
+                            </div>
+                            <div class="nav-item" :class="{active:navActive=='log'}" @click="navActive='log'">{{$L('动态')}}</div>
+                            <div v-if="navActive=='log'" class="refresh">
+                                <Loading v-if="logLoadIng"/>
+                                <Icon v-else type="ios-refresh" @click="getLogLists"></Icon>
+                            </div>
+                        </div>
+                    </div>
+                </DialogWrapper>
+                <ProjectLog v-if="navActive=='log' && taskId > 0" ref="log" :task-id="taskDetail.id" @on-load-change="logLoadChange"/>
+            </template>
+            <div v-else>
+                <div class="head">
+                    <Icon class="icon" type="ios-chatbubbles-outline" />
+                    <div class="nav">
+                        <div class="nav-item" :class="{active:navActive=='dialog'}" @click="navActive='dialog'">{{$L('讨论')}}</div>
+                        <div class="nav-item" :class="{active:navActive=='log'}" @click="navActive='log'">{{$L('动态')}}</div>
+                        <div v-if="navActive=='log'" class="refresh">
+                            <Loading v-if="logLoadIng"/>
+                            <Icon v-else type="ios-refresh" @click="getLogLists"></Icon>
+                        </div>
+                    </div>
+                    <div class="menu">
+                        <div v-if="navActive=='dialog' && taskDetail.msg_num > 0" class="menu-item" @click.stop="onOpen">
+                            <div v-if="openLoad > 0" class="menu-load"><Loading/></div>
+                            {{$L('任务讨论')}}
+                            <em>({{taskDetail.msg_num > 999 ? '999+' : taskDetail.msg_num}})</em>
+                            <i class="taskfont">&#xe703;</i>
+                        </div>
+                    </div>
+                </div>
+                <ProjectLog
+                    v-if="navActive=='log' && taskId > 0"
+                    ref="log"
+                    :task-id="taskDetail.id"
+                    :show-load="false"
+                    @on-load-change="logLoadChange"/>
+                <div
+                    v-else
+                    class="no-dialog"
+                    @drop.prevent="taskPasteDrag($event, 'drag')"
+                    @dragover.prevent="taskDragOver(true, $event)"
+                    @dragleave.prevent="taskDragOver(false, $event)">
+                    <div class="no-input">
+                        <ChatInput
+                            ref="chatInput"
+                            :task-id="taskId"
+                            v-model="msgText"
+                            :loading="sendLoad > 0"
+                            :maxlength="200000"
+                            :placeholder="$L('输入消息...')"
+                            @on-focus="onFocus"
+                            @on-more="onEventMore"
+                            @on-file="onSelectFile"
+                            @on-record="onRecord"
+                            @on-send="onSend"/>
+                    </div>
+                    <div v-if="dialogDrag" class="drag-over" @click="dialogDrag=false">
+                        <div class="drag-text">{{$L('拖动到这里发送')}}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div v-if="!taskDetail.id" class="task-load"><Loading/></div>
+        <!-- 提示  -->
+        <TaskExistTips ref="taskExistTipsRef" @onContinue="updateData('timesSave', updateParams)"/>
+        <!--任务延期-->
+        <Modal
+            v-model="delayTaskShow"
+            :title="$L('任务延期')"
+            :mask-closable="false"
+            width="450px">
+            <Form
+                ref="formDelayTaskRef"
+                :model="delayTaskForm"
+                :rules="delayTaskRule"
+                v-bind="formOptions"
+                @submit.native.prevent>
+                <FormItem :label="$L('延期时长')" prop="time">
+                    <Input type="number" v-model="delayTaskForm.time" :placeholder="$L('请输入时长')">
+                        <template #append>
+                            <Select v-model="delayTaskForm.type" style="width:auto">
+                                <Option value="hour">{{$L('小时')}}</Option>
+                                <Option value="day">{{$L('天')}}</Option>
+                            </Select>
+                        </template>
+                    </Input>
+                    <div class="form-tip form-quick-select">
+                        <span>{{$L('快捷选择')}}:</span>
+                        <em v-for="(item, index) in delayTaskQuicks" :key="index" @click="onTaskQuick(item.time, item.type)">{{$L(item.name)}}</em>
+                    </div>
+                </FormItem>
+                <FormItem :label="$L('延期备注')" prop="remark">
+                    <Input type="textarea" v-model="delayTaskForm.remark" :placeholder="$L('请输入修改备注')"></Input>
+                </FormItem>
+            </Form>
+            <div slot="footer">
+                <Button @click="delayTaskShow=false">{{$L('关闭')}}</Button>
+                <Button type="primary" @click="onDelay">{{$L('确定')}}</Button>
+            </div>
+        </Modal>
+        <!--任务描述历史记录-->
+        <Modal
+            v-model="historyShow"
+            :title="$L('任务描述历史记录')"
+            :mask-closable="false"
+            :styles="{
+                width: '90%',
+                maxWidth: '700px'
+            }">
+            <TaskContentHistory v-if="historyShow" :task-id="taskDetail.id" :task-name="taskDetail.name"/>
+            <div slot="footer">
+                <Button @click="historyShow=false">{{$L('关闭')}}</Button>
+            </div>
+        </Modal>
+        <!--批量创建里程碑-->
+        <Modal
+            v-model="batchCreateShow"
+            :title="$L('批量创建里程碑')"
+            :mask-closable="false"
+            width="500">
+            <div class="batch-milestone-form">
+                <div class="form-tip">
+                    <Icon type="ios-information-circle" />
+                    {{$L('里程碑将任务分为多个阶段，最后一段自动显示为"Final"（跟随任务结束日期）')}}
+                </div>
+                <div class="form-row">
+                    <label>{{$L('阶段数量')}}:</label>
+                    <InputNumber v-model="batchCount" :min="2" :max="10" style="width: 120px;"/>
+                    <span style="margin-left: 8px; color: #999; font-size: 12px;">
+                        {{$L('将创建')}} {{batchCount - 1}} {{$L('个里程碑')}}
+                    </span>
+                </div>
+                <div class="form-row">
+                    <label>{{$L('预览')}}:</label>
+                    <div class="milestone-preview">
+                        <div v-for="(item, idx) in batchPreview" :key="idx" class="preview-item">
+                            <Input v-model="item.name" size="small" style="width: 120px; margin-right: 8px;"/>
+                            <DatePicker
+                                v-model="item.date"
+                                type="date"
+                                format="yyyy-MM-dd"
+                                size="small"
+                                style="width: 140px; margin-right: 8px;"/>
+                            <div
+                                class="color-preview"
+                                :style="{ backgroundColor: item.color }"
+                                @click="showColorPicker(idx)"/>
+                        </div>
+                    </div>
+                </div>
+                <div v-if="colorPickerIndex !== null" class="color-picker-panel">
+                    <div class="color-picker-title">{{$L('选择颜色')}}:</div>
+                    <div class="color-options">
+                        <div
+                            v-for="color in milestoneColors"
+                            :key="color"
+                            class="color-option-large"
+                            :class="{ 'active': batchPreview[colorPickerIndex].color === color }"
+                            :style="{ backgroundColor: color }"
+                            @click="setBatchColor(colorPickerIndex, color)"/>
+                    </div>
+                </div>
+            </div>
+            <div slot="footer">
+                <Button @click="batchCreateShow=false">{{$L('取消')}}</Button>
+                <Button type="primary" @click="confirmBatchCreate">{{$L('确定')}}</Button>
+            </div>
+        </Modal>
+        <!--批量创建子任务-->
+        <Modal
+            v-model="batchCreateSubtaskShow"
+            :title="$L('批量创建子任务')"
+            :mask-closable="false"
+            width="500">
+            <div class="batch-milestone-form">
+                <div class="form-tip">
+                    <Icon type="ios-information-circle" />
+                    {{$L('快速创建多个子任务，可以自定义每个子任务的名称')}}
+                </div>
+                <div class="form-row">
+                    <label>{{$L('子任务数量')}}:</label>
+                    <InputNumber v-model="batchSubtaskCount" :min="2" :max="20" style="width: 120px;"/>
+                </div>
+                <div class="form-row">
+                    <label>{{$L('预览')}}:</label>
+                    <div class="milestone-preview">
+                        <div v-for="(item, idx) in batchSubtaskPreview" :key="idx" class="preview-item">
+                            <span style="margin-right: 8px; color: #999; width: 30px; display: inline-block;">{{idx + 1}}.</span>
+                            <Input v-model="item.name" size="small" style="flex: 1;"/>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div slot="footer">
+                <Button @click="batchCreateSubtaskShow=false">{{$L('取消')}}</Button>
+                <Button type="primary" @click="confirmBatchCreateSubtask">{{$L('确定')}}</Button>
+            </div>
+        </Modal>
+        <!--标签添加-->
+        <TaskTagAdd ref="addTag" :project-id="taskDetail.project_id" @on-save="onTagAddSave"/>
+    </div>
+</template>
+
+<script>
+import {mapState} from "vuex";
+import TaskPriority from "./TaskPriority";
+import TaskUpload from "./TaskUpload";
+import DialogWrapper from "./DialogWrapper";
+import ProjectLog from "./ProjectLog";
+import TaskMenu from "./TaskMenu";
+import ChatInput from "./ChatInput";
+import UserSelect from "../../../components/UserSelect.vue";
+import TaskTag from "./ProjectTaskTag/tags.vue";
+import TaskTagSelect from "./ProjectTaskTag/select.vue";
+import TaskExistTips from "./TaskExistTips.vue";
+import TEditorTask from "../../../components/TEditorTask.vue";
+import ResizeLine from "../../../components/ResizeLine.vue";
+import TaskContentHistory from "./TaskContentHistory.vue";
+import TaskTagAdd from "./ProjectTaskTag/add.vue";
+import emitter from "../../../store/events";
+import resizeObserver from "../../../directives/resize-observer";
+
+export default {
+    name: "TaskDetail",
+    components: {
+        ResizeLine,
+        TaskTagAdd,
+        TaskContentHistory,
+        TEditorTask,
+        UserSelect,
+        TaskTag,
+        TaskTagSelect,
+        TaskExistTips,
+        ChatInput,
+        TaskMenu,
+        ProjectLog,
+        DialogWrapper,
+        TaskUpload,
+        TaskPriority,
+    },
+    directives: {resizeObserver},
+    props: {
+        taskId: {
+            type: Number,
+            default: 0
+        },
+        openTask: {
+            type: Object,
+            default: () => {
+                return {};
+            }
+        },
+        mainEndAt: {
+            default: null
+        },
+        // 允许失去焦点更新
+        canUpdateBlur: {
+            type: Boolean,
+            default: true
+        },
+        // 是否Modal模式
+        modalMode: {
+            type: Boolean,
+            default: false
+        },
+    },
+    data() {
+        return {
+            ready: false,
+
+            taskDetail: {},
+            taskDialogWidth: $A.getStorageInt('task.dialogWidth', -1),
+
+            ownerData: {},
+            ownerLoad: 0,
+
+            receiveShow: false,
+
+            tagForce: false,
+            tagShow: false,
+            tagValue: [],
+            tagBakValue: [],
+            tagData: [],
+            tagLoad: 0,
+
+            assistForce: false,
+            assistData: {},
+            assistLoad: 0,
+
+            visibleForce: false,
+
+            addsubForce: false,
+            addsubShow: false,
+            addsubName: "",
+            addsubLoad: 0,
+
+            // 子任务的添加子任务状态
+            subTaskInputVisible: false,
+            subTaskInputName: "",
+            subTaskInputLoading: false,
+
+            milestoneList: [],
+            milestoneColors: ['#4A90E2', '#F5A623', '#FF6B6B', '#50E3C2', '#9013FE', '#7ED321', '#BD10E0', '#4A4A4A'],
+            finalMilestone: {
+                name: 'Final',
+                color: '#52c41a'
+            },
+            batchCreateShow: false,
+            batchCount: 3,
+            batchPreview: [],
+            colorPickerIndex: null,
+
+            batchCreateSubtaskShow: false,
+            batchSubtaskCount: 5,
+            batchSubtaskPreview: [],
+
+            subtaskNameEditing: false,
+            subtaskNameClickTimer: null,
+
+            timeForce: false,
+            timeOpen: false,
+            timeValue: [],
+            timeOptions: {shortcuts: $A.timeOptionShortcuts()},
+
+            loopForce: false,
+
+            relatedTasks: [],
+            relatedRequestKey: 0,
+
+            keepInterval: null,
+            keepIntoTimer: null,
+            keepUnix: $A.dayjs().unix(),
+
+            msgText: '',
+            msgFile: [],
+            msgRecord: {},
+            msgType: '',
+            navActive: 'dialog',
+            logLoadIng: false,
+
+            sendLoad: 0,
+            openLoad: 0,
+
+            dialogDrag: false,
+            imageAttachment: true,
+
+            loops: [
+                {key: 'never', label: '从不'},
+                {key: 'day', label: '每天'},
+                {key: 'weekdays', label: '工作日'},
+                {key: 'week', label: '每周'},
+                {key: 'twoweeks', label: '每两周'},
+                {key: 'month', label: '每月'},
+                {key: 'year', label: '每年'},
+                {key: 'custom', label: '自定义'},
+            ],
+
+            updateParams: {},
+
+            delayTaskShow: false,
+            delayTaskQuicks: [],
+            delayTaskForm: {
+                type: "hour",
+                time: 24,
+                remark: ""
+            },
+            delayTaskRule: {
+                time: [
+                    { required: true,  message: this.$L('请输入时长'), trigger: 'blur', pattern: /^\d+(\.\d+)?$/ },
+                ],
+                remark: [
+                    { required: true, message: this.$L('请输入备注'), trigger: 'blur' },
+                ],
+            },
+
+            historyShow: false,
+        }
+    },
+
+    created() {
+        const navActive = $A.getObject(this.$route.query, 'navActive')
+        if (['dialog', 'log'].includes(navActive)) {
+            this.navActive = navActive;
+        }
+        $A.IDBJson('delayTaskForm').then(data => {
+            data.time && this.$set(this.delayTaskForm, 'time', Math.round(data.time * 100) / 100);
+            data.type && this.$set(this.delayTaskForm, 'type', data.type);
+        });
+        if (this.taskDialogWidth === -1) {
+            this.taskDialogWidth = Math.min(450, Math.min(1200, this.windowWidth * 0.9) * 0.4)
+        }
+    },
+
+    mounted() {
+        this.keepInterval = setInterval(() => {
+            this.keepUnix = $A.dayjs().unix();
+            this.keepIntoInput();
+        }, 1000);
+        //
+        emitter.on('receiveTask', this.onReceiveShow);
+        emitter.on('taskRelationUpdate', this.onTaskRelationUpdate);
+    },
+
+    destroyed() {
+        clearInterval(this.keepInterval);
+        //
+        emitter.off('receiveTask', this.onReceiveShow);
+        emitter.off('taskRelationUpdate', this.onTaskRelationUpdate);
+    },
+
+    computed: {
+        ...mapState([
+            'systemConfig',
+
+            'cacheProjects',
+            'cacheColumns',
+            'cacheTasks',
+            'cacheDialogs',
+
+            'taskContents',
+            'taskFiles',
+            'taskPriority',
+
+            'formOptions',
+            'keyboardShow'
+        ]),
+
+        projectName() {
+            if (!this.taskDetail.project_id) {
+                return ''
+            }
+            if (this.taskDetail.project_name) {
+                return this.taskDetail.project_name;
+            }
+            const project = this.cacheProjects.find(({id}) => id == this.taskDetail.project_id)
+            return project ? project.name : '';
+        },
+
+        columnName() {
+            if (!this.taskDetail.column_id) {
+                return ''
+            }
+            if (this.taskDetail.column_name) {
+                return this.taskDetail.column_name;
+            }
+            const column = this.cacheColumns.find(({id}) => id == this.taskDetail.column_id)
+            return column ? column.name : '';
+        },
+
+        // 任务层级路径（面包屑导航）
+        taskBreadcrumbs() {
+            const breadcrumbs = [];
+            let currentTask = this.taskDetail;
+
+            // 向上遍历父任务
+            while (currentTask && currentTask.parent_id) {
+                const parentTask = this.cacheTasks.find(({id}) => id == currentTask.parent_id);
+                if (parentTask) {
+                    breadcrumbs.unshift({
+                        id: parentTask.id,
+                        name: parentTask.name
+                    });
+                    currentTask = parentTask;
+                } else {
+                    break;
+                }
+            }
+
+            // 添加当前任务
+            if (this.taskDetail.id) {
+                breadcrumbs.push({
+                    id: this.taskDetail.id,
+                    name: this.taskDetail.name,
+                    isCurrent: true
+                });
+            }
+
+            return breadcrumbs;
+        },
+
+        taskContent() {
+            if (!this.taskId) {
+                return "";
+            }
+            const content = this.taskContents.find(({task_id}) => task_id == this.taskId)
+            return content?.content || ''
+        },
+
+        fileList() {
+            if (!this.taskId) {
+                return [];
+            }
+            return this.taskFiles.filter(({task_id}) => {
+                return task_id == this.taskId
+            }).sort((a, b) => {
+                return b.id - a.id;
+            });
+        },
+
+        subList() {
+            if (!this.taskId) {
+                return [];
+            }
+            return this.cacheTasks.filter(task => {
+                return task.parent_id == this.taskId
+            }).sort((a, b) => {
+                return a.id - b.id;
+            });
+        },
+
+        // 当前任务的直接子任务（用于子任务组件）
+        mySubList() {
+            if (!this.taskId || !this.isSubTask) {
+                return [];
+            }
+            return this.cacheTasks.filter(task => {
+                return task.parent_id == this.taskId
+            }).sort((a, b) => {
+                return a.id - b.id;
+            });
+        },
+
+        hasOpenDialog() {
+            return this.taskDetail.dialog_id > 0 && this.windowLandscape;
+        },
+
+        dialogStyle() {
+            const {windowHeight, taskDialogWidth, hasOpenDialog} = this;
+            const height = Math.min(1100, windowHeight)
+            if (!height) {
+                return {};
+            }
+            if (!hasOpenDialog) {
+                return {};
+            }
+            const factor = height > 900 ? 200 : 70;
+            return {
+                minHeight: (height - factor - 48) + 'px',
+                width: taskDialogWidth + 'px',
+            }
+        },
+
+        taskDetailClass() {
+            const {taskDetail, hasOpenDialog} = this;
+            return {
+                'open-dialog': hasOpenDialog,
+                'completed': taskDetail.complete_at
+            }
+        },
+
+        taskDetailStyle() {
+            const {modalMode, keyboardShow, windowHeight, hasOpenDialog} = this;
+            const style = {}
+            if (modalMode) {
+                if (hasOpenDialog) {
+                    style.maxHeight = `${Math.min(1100, windowHeight) - (windowHeight > 900 ? 200 : 70) - 30}px`;
+                }
+                if (keyboardShow && $A.isIos()) {
+                    style.overflow = 'hidden'
+                }
+            }
+            return style
+        },
+
+        cutTime() {
+            const {taskDetail} = this;
+            let start_at = $A.dayjs(taskDetail.start_at);
+            let end_at = $A.dayjs(taskDetail.end_at);
+            let string = "";
+            if (start_at.format('YYYY/MM/DD') == end_at.format('YYYY/MM/DD')) {
+                string = start_at.format('YYYY/MM/DD HH:mm') + " ~ " + end_at.format('HH:mm')
+            } else if (start_at.year() == end_at.year()) {
+                string = start_at.format('YYYY/MM/DD HH:mm') + " ~ " + end_at.format('MM/DD HH:mm')
+                string = string.replace(/( 00:00| 23:59)/g, "")
+            } else {
+                string = start_at.format('YYYY/MM/DD HH:mm') + " ~ " + end_at.format('YYYY/MM/DD HH:mm')
+                string = string.replace(/( 00:00| 23:59)/g, "")
+            }
+            return string
+        },
+
+        getTag() {
+            const {taskDetail} = this;
+            if (!$A.isArray(taskDetail.task_tag)) {
+                return [];
+            }
+            return taskDetail.task_tag;
+        },
+
+        getOwner() {
+            const {taskDetail} = this;
+            if (!$A.isArray(taskDetail.task_user)) {
+                return [];
+            }
+            return taskDetail.task_user.filter(({owner}) => owner === 1).sort((a, b) => {
+                return a.id - b.id;
+            });
+        },
+
+        getAssist() {
+            const {taskDetail} = this;
+            if (!$A.isArray(taskDetail.task_user)) {
+                return [];
+            }
+            return taskDetail.task_user.filter(({owner}) => owner === 0).sort((a, b) => {
+                return a.id - b.id;
+            });
+        },
+
+        menuList() {
+            const {taskDetail} = this;
+            const list = [];
+            if ($A.arrayLength(taskDetail.task_tag) === 0) {
+                list.push({
+                    command: 'tag',
+                    icon: '&#xe61e;',
+                    name: '标签',
+                });
+            }
+            if (!taskDetail.p_name) {
+                list.push({
+                    command: 'priority',
+                    icon: '&#xe6ec;',
+                    name: '优先级',
+                });
+            }
+            if (!($A.isArray(taskDetail.task_user) && taskDetail.task_user.find(({owner}) => owner === 0 ))) {
+                list.push({
+                    command: 'assist',
+                    icon: '&#xe63f;',
+                    name: '协助人员',
+                });
+            }
+            if (taskDetail.visibility <= 1 && !this.visibleKeep) {
+                list.push({
+                    command: 'visible',
+                    icon: '&#xe77b;',
+                    name: '可见性',
+                });
+            }
+            if (!taskDetail.end_at) {
+                list.push({
+                    command: 'times',
+                    icon: '&#xe6e8;',
+                    name: '截止时间',
+                });
+            }
+            if (!taskDetail.loop || taskDetail.loop == 'never') {
+                list.push({
+                    command: 'loop',
+                    icon: '&#xe93f;',
+                    name: '重复周期',
+                });
+            }
+            if (this.fileList.length == 0) {
+                list.push({
+                    command: 'file',
+                    icon: '&#xe6e6;',
+                    name: '附件',
+                });
+            }
+            if (this.subList.length == 0) {
+                list.push({
+                    command: 'subtask',
+                    icon: '&#xe6f0;',
+                    name: '子任务',
+                });
+            }
+            return list;
+        },
+
+        menuText() {
+            const {menuList} = this
+            let text = ''
+            if (menuList.length > 0) {
+                menuList.forEach((item, index) => {
+                    if (index > 0) {
+                        text += " / "
+                    }
+                    text += this.$L(item.name)
+                })
+            }
+            return text
+        },
+
+        visibleKeep() {
+            return this.systemConfig.task_visible === 'open'    // 可见性保持显示
+        },
+
+        isSubTask({taskDetail, mainEndAt}) {
+            // 只有在父任务的子任务列表中显示时才使用简化视图
+            // 单独打开子任务详情时（mainEndAt 为 null），显示完整视图
+            return taskDetail.parent_id > 0 && mainEndAt !== null
+        },
+
+        showSubTime({taskDetail, mainEndAt}) {
+            return taskDetail.parent_id > 0
+                && !taskDetail.complete_at
+                && taskDetail.end_at
+                && taskDetail.end_at != mainEndAt
+        },
+
+        dialogData({taskDetail}) {
+            if (!taskDetail.dialog_id) {
+                return {}
+            }
+            return this.cacheDialogs.find(({id}) => id == taskDetail.dialog_id) || {}
+        },
+
+        msgTypes({dialogData}) {
+            const array = [
+                {value: '', label: this.$L('全部')},
+            ];
+            if (dialogData.has_tag) {
+                array.push({value: 'tag', label: this.$L('标注')})
+            }
+            if (dialogData.has_todo) {
+                array.push({value: 'todo', label: this.$L('事项')})
+            }
+            if (dialogData.has_image) {
+                array.push({value: 'image', label: this.$L('图片')})
+            }
+            if (dialogData.has_file) {
+                array.push({value: 'file', label: this.$L('文件')})
+            }
+            if (dialogData.has_link) {
+                array.push({value: 'link', label: this.$L('链接')})
+            }
+            return array
+        },
+    },
+
+    watch: {
+        openTask: {
+            handler(data) {
+                const oldTaskId = this.taskDetail?.id;
+                this.taskDetail = $A.cloneJSON(data);
+                this.__openTask && clearTimeout(this.__openTask);
+                this.__openTask = setTimeout(_ => this.$refs.name?.resizeTextarea(), 100)
+
+                // 初始化里程碑列表
+                if (oldTaskId !== data.id) {
+                    // 切换任务时，完全重新初始化
+                    this.milestoneList = Array.isArray(data.milestones) ? $A.cloneJSON(data.milestones) : [];
+                    // 初始化 Final 里程碑
+                    this.finalMilestone = {
+                        name: data.final_milestone_name || 'Final',
+                        color: data.final_milestone_color || '#52c41a'
+                    };
+                } else {
+                    // 同一任务更新时，合并服务器数据和本地正在编辑的数据
+                    const serverMilestones = Array.isArray(data.milestones) ? data.milestones : [];
+                    const editingMilestones = this.milestoneList.filter(m => !m.name || !m.name.trim());
+                    this.milestoneList = [...serverMilestones, ...editingMilestones];
+                    // 同步更新 Final 里程碑
+                    this.finalMilestone = {
+                        name: data.final_milestone_name || 'Final',
+                        color: data.final_milestone_color || '#52c41a'
+                    };
+                }
+            },
+            immediate: true,
+            deep: true
+        },
+        taskId: {
+            handler(id) {
+                if (id > 0) {
+                    this.ready = true;
+                    this.loadRelatedTasks();
+                } else {
+                    $A.eeuiAppKeyboardHide()
+                    this.timeOpen = false;
+                    this.timeForce = false;
+                    this.loopForce = false;
+                    this.tagForce = false;
+                    this.assistForce = false;
+                    this.visibleForce = false;
+                    this.addsubForce = false;
+                    this.receiveShow = false;
+                    this.$refs.chatInput?.hidePopover();
+                    this.relatedRequestKey++;
+                    this.relatedTasks = [];
+                }
+            },
+            immediate: true
+        },
+        batchCount(val) {
+            if (this.batchCreateShow && val >= 2 && val <= 10) {
+                this.generateBatchPreview();
+            }
+        },
+        batchSubtaskCount(val) {
+            if (this.batchCreateSubtaskShow && val >= 2 && val <= 20) {
+                this.generateBatchSubtaskPreview();
+            }
+        },
+        getOwner: {
+            handler(arr) {
+                const list = arr.map(({userid}) => userid)
+                this.$set(this.taskDetail, 'owner_userid', list)
+                this.$set(this.ownerData, 'owner_userid', list)
+                this.$set(this.assistData, 'disabled', arr.map(({userid}) => userid).filter(userid => userid != this.userId))
+            },
+            immediate: true
+        },
+        getAssist: {
+            handler(arr) {
+                const list = arr.map(({userid}) => userid)
+                this.$set(this.taskDetail, 'assist_userid', list)
+                this.$set(this.assistData, 'assist_userid', list);
+            },
+            immediate: true
+        },
+        receiveShow(val) {
+            if (val) {
+                this.timeValue = this.taskDetail.end_at ? [this.taskDetail.start_at, this.taskDetail.end_at] : [];
+            }
+        },
+        "taskDetail.visibility_appointor": {
+            handler(arr) {
+                if (arr?.filter(id=>id).length > 0) {
+                    this.taskDetail.visibility = 3
+                    this.updateVisible()
+                }
+            },
+            immediate: true
+        },
+        tagShow(val) {
+            if (val) {
+                this.tagValue = this.getTag;
+                this.tagBakValue = $A.cloneJSON(this.tagValue);
+                //
+                const isLoad = this.tagValue.length === 0 && this.tagData.length === 0;
+                isLoad && this.tagLoad++;
+                this.$store.dispatch("call", {
+                    url: "project/tag/list",
+                    data: {
+                        project_id: this.taskDetail.project_id
+                    }
+                }).then(res => {
+                    this.tagData = res.data;
+                }).finally(_ => {
+                    isLoad && this.tagLoad--;
+                })
+            } else {
+                const isChanged = (() => {
+                    if (this.tagValue.length !== this.tagBakValue.length) return true;
+                    const sortValue = arr => [...arr].map(({name, color}) => ({name, color})).sort((a, b) => a.name.localeCompare(b.name));
+                    const sortedValue = sortValue(this.tagValue);
+                    const sortedBakValue = sortValue(this.tagBakValue);
+                    return JSON.stringify(sortedValue) !== JSON.stringify(sortedBakValue);
+                })();
+                if (isChanged) {
+                    this.updateData('tag', this.tagValue);
+                }
+            }
+        },
+        taskDialogWidth(w, o) {
+            if (o === -1) {
+                return;
+            }
+            $A.setStorage('task.dialogWidth', w);
+        }
+    },
+
+    methods: {
+        navigateToTask(taskId) {
+            // 跳转到指定任务的详情页
+            this.$store.dispatch("openTask", {id: taskId});
+        },
+
+        handleSubtaskNameClick() {
+            // 使用延迟区分单击和双击
+            if (this.subtaskNameClickTimer) {
+                // 如果已有定时器，说明是双击，清除定时器不执行单击
+                clearTimeout(this.subtaskNameClickTimer);
+                this.subtaskNameClickTimer = null;
+                return;
+            }
+
+            // 设置延迟执行单击操作
+            this.subtaskNameClickTimer = setTimeout(() => {
+                this.navigateToTask(this.taskDetail.id);
+                this.subtaskNameClickTimer = null;
+            }, 150);
+        },
+
+        startEditSubtaskName() {
+            // 双击开始编辑子任务名称
+            // 清除单击定时器
+            if (this.subtaskNameClickTimer) {
+                clearTimeout(this.subtaskNameClickTimer);
+                this.subtaskNameClickTimer = null;
+            }
+
+            this.subtaskNameEditing = true;
+            this.$nextTick(() => {
+                this.$refs.subtaskNameInput?.focus();
+            });
+        },
+
+        finishEditSubtaskName() {
+            // 失去焦点时保存并退出编辑模式
+            this.subtaskNameEditing = false;
+            this.updateBlur('name');
+        },
+
+        getFlowStatusStyle(task) {
+            // 根据流程状态返回圆圈的背景色
+            if (!task.flow_item_status) {
+                return {
+                    backgroundColor: '#d9d9d9'  // 默认灰色
+                };
+            }
+
+            const statusColors = {
+                'start': '#ff4d4f',      // 待处理 - 红色
+                'progress': '#ff9900',   // 进行中 - 橙色
+                'test': '#1890ff',       // 待测试 - 蓝色
+                'end': '#52c41a'         // 已完成 - 绿色
+            };
+
+            const color = task.flow_item_color || statusColors[task.flow_item_status] || '#d9d9d9';
+
+            return {
+                backgroundColor: color
+            };
+        },
+
+        onReceiveShow() {
+            this.receiveShow = true;
+        },
+
+        within24Hours(date) {
+            return ($A.dayjs(date).unix() - this.keepUnix) < 86400
+        },
+
+        expiresFormat(date) {
+            return $A.countDownFormat(this.keepUnix, date)
+        },
+
+        tagColor(taskDetail) {
+            if (taskDetail.overdue) {
+                return 'red';
+            }
+            if (taskDetail.today) {
+                return 'orange';
+            }
+            return 'blue'
+        },
+
+        loopLabel(loop) {
+            const item = this.loops.find(item => item.key === loop)
+            if (item) {
+                return item.label
+            }
+            return loop ? `每${loop}天` : '从不'
+        },
+
+        onNameKeydown(e) {
+            if (e.keyCode === 13) {
+                if (!e.shiftKey) {
+                    e.preventDefault();
+                    this.updateData('name');
+                }
+            }
+        },
+
+        checkUpdate(action) {
+            let isModify = false;
+            if (this.openTask.name != this.taskDetail.name) {
+                isModify = true;
+                if (action === true) {
+                    this.updateData('name');
+                } else {
+                    action === false && this.$refs.name.focus();
+                    return true
+                }
+            }
+            if (this.$refs.desc && this.$refs.desc.getContent() != this.taskContent) {
+                isModify = true;
+                if (action === true) {
+                    this.updateData('content');
+                } else {
+                    action === false && this.$refs.desc.focus();
+                    return true
+                }
+            }
+            if (this.addsubShow && this.addsubName) {
+                isModify = true;
+                if (action === true) {
+                    this.onAddsub();
+                } else {
+                    action === false && this.$refs.addsub.focus();
+                    return true
+                }
+            }
+            this.subList.some(({id}) => {
+                if (this.$refs[`subTask_${id}`][0].checkUpdate(action)) {
+                    isModify = true;
+                }
+            })
+            return isModify;
+        },
+
+        onHistory() {
+            this.historyShow = true;
+        },
+
+        updateBlur(action, params) {
+            if (this.canUpdateBlur) {
+                this.updateData(action, params)
+            }
+        },
+
+        updateData(action, params) {
+            let successCallback = null;
+            switch (action) {
+                case 'priority':
+                    this.$set(this.taskDetail, 'p_level', params.priority)
+                    this.$set(this.taskDetail, 'p_name', params.name)
+                    this.$set(this.taskDetail, 'p_color', params.color)
+                    action = ['p_level', 'p_name', 'p_color'];
+                    break;
+
+                case 'times':
+                    // 没有开始时间，直接保存
+                    if (!this.taskDetail.start_at) {
+                        this.isExistTask(params).then(() => {
+                            this.updateData("timesSave", params)
+                        });
+                        return;
+                    }
+                    // 时间变化未超过1分钟，不保存
+                    if (Math.abs($A.dayjs(this.taskDetail.start_at).unix() - $A.dayjs(params.start_at).unix()) < 60 && Math.abs($A.dayjs(this.taskDetail.end_at).unix() - $A.dayjs(params.end_at).unix()) < 60) {
+                        return;
+                    }
+                    // 已经有备注，直接保存
+                    if (params.desc) {
+                        this.isExistTask(params).then(() => {
+                            this.updateData("timesSave", params)
+                        });
+                        return;
+                    }
+                    // 子任务修改时间，如果之前跟主任务的时间相同，直接保存
+                    if (this.isSubTask && !this.showSubTime) {
+                        this.isExistTask(params).then(() => {
+                            this.updateData("timesSave", params)
+                        });
+                        return;
+                    }
+                    // 弹出修改备注
+                    let isClear = !params.start_at || !params.end_at;
+                    let title = `修改${this.isSubTask ? '子任务' : '任务'}时间`
+                    let placeholder = `请输入修改备注`
+                    if (isClear) {
+                        title = `清除${this.isSubTask ? '子任务' : '任务'}时间`
+                        placeholder = `请输入清除备注`
+                    }
+                    $A.modalInput({
+                        title,
+                        placeholder,
+                        okText: "确定",
+                        okType: isClear ? "warning" : "primary",
+                        onOk: (desc) => {
+                            if (!desc) {
+                                return placeholder
+                            }
+                            params.desc = desc;
+                            this.isExistTask(params).then(() => {
+                                this.updateData("timesSave", params)
+                            })
+                            return false
+                        },
+                    })
+                    return;
+
+                case 'timesSave':
+                    action = 'times';
+                    this.$set(this.taskDetail, 'times', [params.start_at, params.end_at, params.desc])
+                    break;
+
+                case 'loop':
+                    if (params === 'custom') {
+                        this.customLoop()
+                        return;
+                    }
+                    this.$set(this.taskDetail, 'loop', params)
+                    break;
+
+                case 'content':
+                    const content = this.$refs.desc.getContent();
+                    if (content == this.taskContent.replace(/\s+original-(width|height)="[^"]*"/g, "")) {
+                        return;
+                    }
+                    if (!this.windowTouch || params === 'force') {
+                        this.updateData("contentSave", {content})
+                        return;
+                    }
+                    $A.modalConfirm({
+                        title: '温馨提示',
+                        content: '是否保存编辑内容？',
+                        onOk: () => {
+                            this.updateData("contentSave", {content})
+                        },
+                        onCancel: () => {
+                            this.$refs.desc.updateContent(this.taskContent);
+                            this.$refs.desc.updateTouchContent();
+                        }
+                    });
+                    return;
+
+                case 'contentSave':
+                    this.$set(this.taskDetail, 'content', params.content)
+                    action = 'content';
+                    successCallback = () => {
+                        this.$store.dispatch("saveTaskContent", {
+                            task_id: this.taskId,
+                            content: params.content
+                        })
+                    }
+                    break;
+
+                case 'tag':
+                    this.$set(this.taskDetail, 'task_tag', params)
+                    action = 'task_tag'
+                    break;
+            }
+            //
+            const dataJson = {task_id: this.taskDetail.id};
+            ($A.isArray(action) ? action : [action]).forEach(key => {
+                let newData = this.taskDetail[key];
+                let originalData = this.openTask[key];
+                if ($A.jsonStringify(newData) != $A.jsonStringify(originalData)) {
+                    dataJson[key] = newData;
+                }
+            })
+            if (Object.keys(dataJson).length <= 1) return;
+            //
+            this.$store.dispatch("taskUpdate", dataJson).then(({msg}) => {
+                $A.messageSuccess(msg);
+                if (typeof successCallback === "function") successCallback();
+            }).catch(({msg}) => {
+                $A.modalError(msg);
+            })
+        },
+
+        isExistTask(params) {
+            return new Promise(resolve => {
+                if (!params.start_at || !params.end_at) {
+                    resolve()
+                    return
+                }
+                this.updateParams = Object.assign({}, params)
+                const tipsRef = this.$refs.taskExistTipsRef
+                if (!tipsRef) {
+                    resolve()
+                    return
+                }
+                tipsRef.isExistTask({
+                    taskid: this.taskDetail.id,
+                    userids: this.taskDetail.owner_userid,
+                    timerange: [params.start_at, params.end_at]
+                }, 600).then(res => {
+                    !res && resolve()
+                })
+            })
+        },
+
+        customLoop() {
+            let value = this.taskDetail.loop || 1
+            $A.Modal.confirm({
+                render: (h) => {
+                    return h('div', [
+                        h('div', {
+                            style: {
+                                fontSize: '16px',
+                                fontWeight: '500',
+                                marginBottom: '20px',
+                            }
+                        }, this.$L('重复周期')),
+                        h('Input', {
+                            style: {
+                                width: '160px',
+                                margin: '0 auto',
+                            },
+                            props: {
+                                type: 'number',
+                                value,
+                                maxlength: 3
+                            },
+                            on: {
+                                input: (val) => {
+                                    value = $.runNum(val)
+                                }
+                            }
+                        }, [
+                            h('span', {slot: 'prepend'}, this.$L('每')),
+                            h('span', {slot: 'append'}, this.$L('天'))
+                        ])
+                    ])
+                },
+                onOk: _ => {
+                    this.$Modal.remove()
+                    if (value > 0) {
+                        this.updateData('loop', value)
+                    }
+                },
+                loading: true,
+                okText: this.$L('确定'),
+                cancelText: this.$L('取消'),
+            });
+        },
+
+        async taskTimeChange() {
+            this.timeValue = await this.$store.dispatch("taskDefaultTime", $A.newDateString(this.timeValue, "YYYY-MM-DD HH:mm"))
+        },
+
+        async onOwner(pick) {
+            let data = {
+                task_id: this.taskDetail.id,
+                owner: this.ownerData.owner_userid
+            }
+            //
+            if (pick === true) {
+                if (this.getOwner.length > 0) {
+                    this.receiveShow = false;
+                    $A.messageError("任务已被领取");
+                    return;
+                }
+                const times = $A.newDateString(this.timeValue, "YYYY-MM-DD HH:mm");
+                if (!(times[0] && times[1])) {
+                    $A.messageError("请设置计划时间");
+                    return;
+                }
+                data.times = times;
+                data.owner = this.ownerData.owner_userid = [this.userId];
+            }
+            if ($A.jsonStringify(this.taskDetail.owner_userid) === $A.jsonStringify(this.ownerData.owner_userid)) {
+                return;
+            }
+            if ($A.count(data.owner) == 0) {
+                data.owner = '';
+            }
+            //
+            this.ownerLoad++;
+            return new Promise((resolve, reject) => {
+                this.$store.dispatch("taskUpdate", data).then(({msg}) => {
+                    $A.messageSuccess(msg);
+                    this.ownerLoad--;
+                    this.receiveShow = false;
+                    this.$store.dispatch("getTaskOne", this.taskDetail.id).catch(() => {})
+                    resolve()
+                }).catch(({msg}) => {
+                    $A.modalError(msg);
+                    this.ownerLoad--;
+                    this.receiveShow = false;
+                    reject()
+                })
+            })
+        },
+
+        onAssist() {
+            if ($A.jsonStringify(this.taskDetail.assist_userid) === $A.jsonStringify(this.assistData.assist_userid)) {
+                return;
+            }
+            return new Promise((resolve, reject) => {
+                if (this.getOwner.find(({userid}) => userid === this.userId) && this.assistData.assist_userid.find(userid => userid === this.userId)) {
+                    $A.modalConfirm({
+                        content: '你当前是负责人，确定要转为协助人员吗？',
+                        cancelText: '取消',
+                        okText: '确定',
+                        onOk: () => {
+                            this.onAssistConfirm().then(resolve).catch(reject)
+                        },
+                        onCancel: () => {
+                            reject()
+                        }
+                    })
+                } else {
+                    this.onAssistConfirm().then(resolve).catch(reject)
+                }
+            })
+        },
+
+        onAssistConfirm() {
+            return new Promise((resolve, reject) => {
+                let assist = this.assistData.assist_userid;
+                if (assist.length === 0) assist = false;
+                this.assistLoad++;
+                this.$store.dispatch("taskUpdate", {
+                    task_id: this.taskDetail.id,
+                    assist,
+                }).then(({msg}) => {
+                    $A.messageSuccess(msg);
+                    this.assistLoad--;
+                    this.$store.dispatch("getTaskOne", this.taskDetail.id).catch(() => {})
+                    resolve()
+                }).catch(({msg}) => {
+                    $A.modalError(msg);
+                    this.assistLoad--;
+                    reject()
+                })
+            })
+        },
+
+        openTime() {
+            this.timeOpen = !this.timeOpen;
+            if (this.timeOpen) {
+                this.timeValue = this.taskDetail.end_at ? [this.taskDetail.start_at, this.taskDetail.end_at] : [];
+            }
+        },
+
+        timeChange(open) {
+            if (!open) {
+                this.timeOpen = false;
+            }
+        },
+
+        timeClear() {
+            this.updateData('times', {
+                start_at: false,
+                end_at: false,
+            });
+            this.timeOpen = false;
+        },
+
+        timeOk() {
+            const times = $A.newDateString(this.timeValue, "YYYY-MM-DD HH:mm");
+            this.updateData('times', {
+                start_at: times[0],
+                end_at: times[1],
+            });
+            this.timeOpen = false;
+        },
+
+        addsubOpen() {
+            this.addsubShow = true;
+            this.$nextTick(() => {
+                this.$refs.addsub.focus()
+            });
+        },
+
+        addsubChackClose() {
+            if (this.addsubName == '') {
+                this.addsubShow = false;
+            }
+        },
+
+        addsubKeydown(e) {
+            if (e.keyCode === 13) {
+                if (e.shiftKey || this.addsubLoad > 0) {
+                    return;
+                }
+                e.preventDefault();
+                this.onAddsub();
+            }
+        },
+
+        onAddsub() {
+            if (this.addsubName == '') {
+                $A.messageError('任务描述不能为空');
+                return;
+            }
+            this.addsubLoad++;
+            this.$store.dispatch("taskAddSub", {
+                task_id: this.taskDetail.id,
+                name: this.addsubName,
+            }).then(({msg}) => {
+                $A.messageSuccess(msg);
+                this.addsubLoad--;
+                this.addsubName = "";
+            }).catch(({msg}) => {
+                $A.modalError(msg);
+                this.addsubLoad--;
+            });
+        },
+
+        // 子任务的添加子任务方法
+        toggleSubTaskInput() {
+            this.subTaskInputVisible = !this.subTaskInputVisible;
+            if (this.subTaskInputVisible) {
+                this.$nextTick(() => {
+                    const ref = this.$refs[`subTaskInput_${this.taskDetail.id}`];
+                    if (ref) {
+                        ref.focus();
+                    }
+                });
+            } else {
+                this.subTaskInputName = "";
+            }
+        },
+
+        onSubTaskInputBlur() {
+            if (this.subTaskInputName === '') {
+                this.subTaskInputVisible = false;
+            }
+        },
+
+        onSubTaskInputKeydown(e) {
+            if (e.keyCode === 13) {
+                if (e.shiftKey || this.subTaskInputLoading) {
+                    return;
+                }
+                e.preventDefault();
+                this.onAddSubTaskChild();
+            }
+        },
+
+        onAddSubTaskChild() {
+            if (this.subTaskInputName === '') {
+                $A.messageError('任务描述不能为空');
+                return;
+            }
+            this.subTaskInputLoading = true;
+            this.$store.dispatch("taskAddSub", {
+                task_id: this.taskDetail.id,  // 当前子任务作为父任务
+                name: this.subTaskInputName,
+            }).then(({msg}) => {
+                $A.messageSuccess(msg);
+                this.subTaskInputName = "";
+                // 保持输入框打开，方便连续添加
+            }).catch(({msg}) => {
+                $A.modalError(msg);
+            }).finally(() => {
+                this.subTaskInputLoading = false;
+            });
+        },
+
+        // 添加里程碑
+        addMilestone() {
+            if (!this.taskDetail.start_at || !this.taskDetail.end_at) {
+                $A.messageWarning('请先设置任务的开始和结束时间');
+                return;
+            }
+
+            const taskStart = $A.dayjs(this.taskDetail.start_at);
+            const taskEnd = $A.dayjs(this.taskDetail.end_at);
+            const existingMilestones = this.milestoneList.filter(m => m.name && m.name.trim());
+
+            if (existingMilestones.length === 0) {
+                // 第一个里程碑：在中间点创建
+                const totalDays = taskEnd.diff(taskStart, 'day');
+                const midDate = taskStart.add(Math.floor(totalDays / 2), 'day');
+
+                this.milestoneList.push({
+                    name: 'V001',
+                    date: midDate.format('YYYY-MM-DD'),
+                    color: this.milestoneColors[0]
+                });
+
+                this.updateMilestones();
+            } else {
+                // 已有里程碑，添加一个空的让用户填写
+                this.milestoneList.push({
+                    name: '',
+                    date: $A.dayjs().format('YYYY-MM-DD'),
+                    color: this.milestoneColors[this.milestoneList.length % this.milestoneColors.length]
+                });
+            }
+        },
+
+        // 删除里程碑
+        removeMilestone(index) {
+            this.milestoneList.splice(index, 1);
+            this.updateMilestones();
+        },
+
+        // 设置里程碑颜色
+        setMilestoneColor(index, color) {
+            // ColorPicker 可能返回 hex 字符串或对象，统一处理为字符串
+            const colorValue = typeof color === 'string' ? color : (color?.hex || color);
+            this.$set(this.milestoneList[index], 'color', colorValue);
+            this.checkAndUpdateMilestone(index);
+        },
+
+        // 显示批量创建模态框
+        showBatchCreateModal() {
+            if (!this.taskDetail.start_at || !this.taskDetail.end_at) {
+                $A.messageWarning('请先设置任务的开始和结束时间');
+                return;
+            }
+            this.batchCount = 3;
+            this.generateBatchPreview();
+            this.colorPickerIndex = null;
+            this.batchCreateShow = true;
+        },
+
+        // 生成批量创建预览
+        generateBatchPreview() {
+            const start = $A.dayjs(this.taskDetail.start_at);
+            const end = $A.dayjs(this.taskDetail.end_at);
+            const totalDays = end.diff(start, 'day');
+            const segmentDays = Math.floor(totalDays / this.batchCount);
+
+            this.batchPreview = [];
+            // 只创建 batchCount-1 个里程碑，最后一段自动为Final
+            for (let i = 0; i < this.batchCount - 1; i++) {
+                const milestoneDate = start.add((i + 1) * segmentDays, 'day');
+
+                this.batchPreview.push({
+                    name: `V${String(i + 1).padStart(3, '0')}`,
+                    date: milestoneDate.toDate(),
+                    color: this.milestoneColors[i % this.milestoneColors.length]
+                });
+            }
+        },
+
+        // 显示颜色选择器
+        showColorPicker(index) {
+            this.colorPickerIndex = this.colorPickerIndex === index ? null : index;
+        },
+
+        // 设置批量创建的颜色
+        setBatchColor(index, color) {
+            this.$set(this.batchPreview[index], 'color', color);
+            this.colorPickerIndex = null;
+        },
+
+        // 更新 Final 里程碑
+        updateFinalMilestone() {
+            // 保存 Final 里程碑的名称和颜色，同时更新任务条颜色
+            const colorValue = typeof this.finalMilestone.color === 'string'
+                ? this.finalMilestone.color
+                : (this.finalMilestone.color?.hex || this.finalMilestone.color);
+
+            console.log('[updateFinalMilestone] 准备发送数据:', {
+                task_id: this.taskDetail.id,
+                final_milestone_name: this.finalMilestone.name,
+                final_milestone_color: colorValue,
+                color: colorValue
+            });
+
+            this.$store.dispatch("taskUpdate", {
+                task_id: this.taskDetail.id,
+                final_milestone_name: this.finalMilestone.name,
+                final_milestone_color: colorValue,
+                color: colorValue  // 同时更新任务条颜色
+            }).then((result) => {
+                console.log('[updateFinalMilestone] 更新成功，返回数据:', result);
+                // taskUpdate 已经通过 saveTask 更新了缓存，不需要手动更新
+            }).catch(({msg}) => {
+                console.error('[updateFinalMilestone] 更新失败:', msg);
+                $A.modalError(msg);
+            });
+        },
+
+        // 确认批量创建
+        confirmBatchCreate() {
+            const newMilestones = this.batchPreview.map(item => ({
+                name: item.name,
+                date: $A.dayjs(item.date).format('YYYY-MM-DD'),
+                color: item.color
+            }));
+
+            this.milestoneList = [...this.milestoneList, ...newMilestones];
+            this.updateMilestones();
+            this.batchCreateShow = false;
+        },
+
+        // 显示批量创建子任务模态框
+        showBatchCreateSubtaskModal() {
+            this.batchSubtaskCount = 5;
+            this.generateBatchSubtaskPreview();
+            this.batchCreateSubtaskShow = true;
+        },
+
+        // 生成批量子任务预览
+        generateBatchSubtaskPreview() {
+            this.batchSubtaskPreview = [];
+            for (let i = 0; i < this.batchSubtaskCount; i++) {
+                this.batchSubtaskPreview.push({
+                    name: `${this.$L('子任务')} ${i + 1}`
+                });
+            }
+        },
+
+        // 确认批量创建子任务
+        confirmBatchCreateSubtask() {
+            const validSubtasks = this.batchSubtaskPreview.filter(item => item.name && item.name.trim());
+
+            if (validSubtasks.length === 0) {
+                $A.messageWarning(this.$L('请至少填写一个子任务名称'));
+                return;
+            }
+
+            // 批量创建子任务
+            let createdCount = 0;
+            validSubtasks.forEach((item, index) => {
+                this.$store.dispatch("taskAdd", {
+                    column_id: this.taskDetail.column_id,
+                    name: item.name.trim(),
+                    parent_id: this.taskDetail.id,
+                }).then(() => {
+                    createdCount++;
+                    if (createdCount === validSubtasks.length) {
+                        // 所有子任务创建完成，刷新任务详情
+                        this.$store.dispatch("getTaskOne", {
+                            task_id: this.taskDetail.id,
+                        });
+                        $A.messageSuccess(this.$L('批量创建成功'));
+                    }
+                }).catch(() => {
+                    $A.messageError(this.$L('创建失败'));
+                });
+            });
+
+            this.batchCreateSubtaskShow = false;
+        },
+
+
+        // 检查并更新里程碑（只有名称和日期都有值时才保存）
+        checkAndUpdateMilestone(index) {
+            const milestone = this.milestoneList[index];
+            if (milestone && milestone.name && milestone.name.trim() && milestone.date) {
+                this.updateMilestones();
+            }
+        },
+
+        // 处理日期变化（DatePicker 返回 Date 对象，需要转换为字符串）
+        handleDateChange(index, date) {
+            if (date) {
+                // 使用 $set 确保响应式更新
+                this.$set(this.milestoneList[index], 'date', $A.dayjs(date).format('YYYY-MM-DD'));
+                // 检查是否需要保存（名称和日期都有值）
+                const milestone = this.milestoneList[index];
+                if (milestone.name && milestone.name.trim()) {
+                    this.$nextTick(() => {
+                        this.updateMilestones();
+                    });
+                }
+            }
+        },
+
+        // 更新里程碑到服务器
+        updateMilestones() {
+            // 过滤掉空名称的里程碑
+            const validMilestones = this.milestoneList.filter(m => m.name && m.name.trim()).map(m => ({
+                name: m.name.trim(),
+                date: typeof m.date === 'string' ? m.date : $A.dayjs(m.date).format('YYYY-MM-DD'),
+                color: m.color || this.milestoneColors[0]
+            }));
+
+            console.log('[updateMilestones] 准备发送数据:', {
+                task_id: this.taskDetail.id,
+                milestones: validMilestones
+            });
+
+            // 如果没有有效的里程碑，也要更新（清空）
+            this.$store.dispatch("taskUpdate", {
+                task_id: this.taskDetail.id,
+                milestones: validMilestones
+            }).then((result) => {
+                console.log('[updateMilestones] 更新成功，返回数据:', result);
+                // taskUpdate 已经通过 saveTask 更新了缓存，不需要手动更新
+            }).catch(({msg}) => {
+                console.error('[updateMilestones] 更新失败:', msg);
+                $A.modalError(msg);
+            });
+        },
+
+        getLogLists() {
+            if (this.navActive != 'log') {
+                return;
+            }
+            this.$refs.log.getLists(true);
+        },
+
+        async loadRelatedTasks() {
+            if (!this.taskId) {
+                this.relatedTasks = [];
+                return;
+            }
+            if (this.isSubTask) {
+                this.relatedTasks = [];
+                return;
+            }
+            const cacheMap = this.$store.state.taskRelatedCache || {};
+            const cached = cacheMap[this.taskId];
+            if (cached?.list) {
+                this.relatedTasks = cached.list;
+            }
+            const requestKey = ++this.relatedRequestKey;
+            try {
+                const data = await this.$store.dispatch('getTaskRelated', this.taskId);
+                if (requestKey !== this.relatedRequestKey) {
+                    return;
+                }
+                this.relatedTasks = data;
+            } catch (e) {
+                if (requestKey === this.relatedRequestKey) {
+                    this.relatedTasks = [];
+                }
+                console.warn(e);
+            }
+        },
+
+        openRelatedTask(item) {
+            if (!item || !item.related_task_id) {
+                return;
+            }
+            if (item.related_task_id === this.taskId) {
+                return;
+            }
+            this.$store.dispatch('openTask', item.related_task_id);
+        },
+
+        onTaskRelationUpdate(taskId) {
+            if (!taskId || taskId !== this.taskId) {
+                return;
+            }
+            if (this.isSubTask) {
+                return;
+            }
+            this.loadRelatedTasks();
+        },
+
+        logLoadChange(load) {
+            this.logLoadIng = load
+        },
+
+        onPriority(event) {
+            const list = this.taskPriority.map(item => {
+                return {
+                    label: item.name,
+                    value: item,
+                    prefix: `<i class="taskfont" style="color:${item.color};font-size:18px">${this.taskDetail.p_name == item.name ? '&#xe61d;' : '&#xe61c;'}</i>`,
+                }
+            });
+            this.$store.commit('menu/operation', {
+                event,
+                list,
+                size: 'large',
+                language: false,
+                onUpdate: (value) => {
+                    this.updateData('priority', value)
+                }
+            })
+        },
+
+        onLoop(event) {
+            const list = this.loops.map(item => {
+                return {
+                    label: item.label,
+                    value: item.key,
+                }
+            });
+            this.$store.commit('menu/operation', {
+                event,
+                list,
+                size: 'large',
+                onUpdate: (newLoop) => {
+                    const currentLoop = this.taskDetail.loop || 'never';
+                    const loopTip = currentLoop == 'never' && newLoop != 'never' && this.subList.length > 0
+                    if (loopTip) {
+                        $A.modalConfirm({
+                            language: false,
+                            content: this.$L('周期任务的子任务时间将被重置，是否继续？'),
+                            onOk: () => {
+                                this.updateData('loop', newLoop)
+                            }
+                        });
+                    } else {
+                        this.updateData('loop', newLoop)
+                    }
+                }
+            })
+        },
+
+        onAddItem(event) {
+            const list = this.menuList.map(item => {
+                return {
+                    label: item.name,
+                    value: item.command,
+                    prefix: `<i class="taskfont">${item.icon}</i>`,
+                }
+            });
+            this.$store.commit('menu/operation', {
+                event,
+                list,
+                size: 'large',
+                onUpdate: (value) => {
+                    this.dropAddItem(value)
+                }
+            })
+        },
+
+        dropAddItem(command) {
+            switch (command) {
+                case 'tag':
+                    this.tagForce = true;
+                    this.$nextTick(() => {
+                        this.tagShow = true;
+                    });
+                    break;
+
+                case 'priority':
+                    this.$set(this.taskDetail, 'p_name', this.$L('未设置'));
+                    this.$nextTick(() => {
+                        this.onPriority({target: this.$refs.priorityText})
+                    })
+                    break;
+
+                case 'assist':
+                    this.assistForce = true;
+                    this.$nextTick(() => {
+                        this.$refs.assist.onSelection();
+                    });
+                    break;
+
+                case 'visible':
+                    this.visibleForce = true;
+                    this.$nextTick(() => {
+                        this.showCisibleDropdown({
+                            target: this.$refs.visibilityText
+                        });
+                    });
+                    break;
+
+                case 'times':
+                    this.timeForce = true;
+                    this.$nextTick(() => {
+                        this.openTime()
+                    })
+                    break;
+
+                case 'loop':
+                    this.loopForce = true;
+                    this.$nextTick(() => {
+                        this.onLoop({target: this.$refs.loopText})
+                    })
+                    break;
+
+                case 'file':
+                    this.onUploadClick(true)
+                    break;
+
+                case 'subtask':
+                    this.addsubForce = true;
+                    this.$nextTick(() => {
+                        this.addsubOpen();
+                    });
+                    break;
+            }
+        },
+
+        onFocus() {
+            this.scrollIntoInput()
+        },
+
+        onEventMore(e) {
+            if (['image', 'file'].includes(e)) {
+                this.onUploadClick(false)
+            }
+        },
+
+        onUploadClick(attachment) {
+            this.imageAttachment = !!attachment;
+            this.$refs.upload.handleClick()
+        },
+
+        msgDialog(sendType = null) {
+            if (this.sendLoad > 0 || this.openLoad > 0) {
+                return;
+            }
+            //
+            if (this.taskDetail.dialog_id) {
+                this.openDialogBefore(this.taskDetail.dialog_id, sendType)
+                return;
+            }
+            //
+            if (sendType === true) {
+                this.openLoad++;
+            } else {
+                this.sendLoad++;
+            }
+            //
+            this.$store.dispatch("call", {
+                url: 'project/task/dialog',
+                data: {
+                    task_id: this.taskDetail.id,
+                },
+            }).then(async ({data}) => {
+                await this.$store.dispatch("saveTask", {id: data.id, dialog_id: data.dialog_id});
+                await this.$store.dispatch("saveDialog", data.dialog_data);
+                this.openDialogBefore(data.dialog_id, sendType)
+            }).catch(({msg}) => {
+                $A.modalError(msg);
+            }).finally(_ => {
+                if (sendType === true) {
+                    this.openLoad--;
+                } else {
+                    this.sendLoad--;
+                }
+            });
+        },
+
+        openDialogBefore(dialogId, sendType) {
+            if (sendType !== true) {
+                this.$store.state.dialogMsgTransfer = {
+                    time: $A.dayjs().unix() + 10,
+                    msgRecord: this.msgRecord,
+                    msgFile: this.msgFile,
+                    msgText: sendType === 'md' ? this.$refs.chatInput?.getText() : this.msgText,
+                    sendType,
+                    dialogId,
+                };
+                this.msgRecord = {};
+                this.msgFile = [];
+                this.msgText = "";
+                this.$store.dispatch("saveDialogDraft", {id: `t_${this.taskId}`, content: ""})
+            }
+
+            if ($A.isSubElectron) {
+                this.resizeDialog()
+                return
+            }
+
+            if (this.windowPortrait) {
+                this.$store.dispatch('openDialog', dialogId).catch(({msg}) => {
+                    $A.modalError(msg);
+                })
+                $A.eeuiAppKeyboardHide();
+            }
+        },
+
+        taskPasteDrag(e, type) {
+            this.dialogDrag = false;
+            if ($A.dataHasFolder(type === 'drag' ? e.dataTransfer : e.clipboardData)) {
+                e.preventDefault();
+                $A.modalWarning(`暂不支持${type === 'drag' ? '拖拽' : '粘贴'}文件夹。`)
+                return;
+            }
+            const files = type === 'drag' ? e.dataTransfer.files : e.clipboardData.files;
+            this.msgFile = Array.prototype.slice.call(files);
+            if (this.msgFile.length > 0) {
+                e.preventDefault();
+                this.msgDialog()
+            }
+        },
+
+        taskDragOver(show, e) {
+            let random = (this.__dialogDrag = $A.randomString(8));
+            if (!show) {
+                setTimeout(() => {
+                    if (random === this.__dialogDrag) {
+                        this.dialogDrag = show;
+                    }
+                }, 150);
+            } else {
+                if (e.dataTransfer.effectAllowed === 'move') {
+                    return;
+                }
+                this.dialogDrag = true;
+            }
+        },
+
+        onSelectFile(row) {
+            this.msgFile = $A.isArray(row) ? row : [row];
+            this.msgDialog()
+        },
+
+        onRecord(row) {
+            this.msgRecord = row;
+            this.msgDialog()
+        },
+
+        onOpen() {
+            this.$refs.chatInput?.hidePopover();
+            this.msgDialog(true);
+        },
+
+        onSend(text, type) {
+            this.$refs.chatInput?.hidePopover();
+            if (typeof text === "string" && text) {
+                this.msgText = text;
+            }
+            this.msgDialog(type);
+        },
+
+        deleteFile(file) {
+            this.$set(file, '_show_menu', false);
+            this.$store.dispatch("forgetTaskFile", file.id)
+            //
+            this.$store.dispatch("call", {
+                url: 'project/task/filedelete',
+                data: {
+                    file_id: file.id,
+                },
+            }).catch(({msg}) => {
+                $A.modalError(msg);
+                this.$store.dispatch("getTaskFiles", this.taskDetail.id)
+            });
+        },
+
+        openMenu(event, task) {
+            const el = this.$refs[`taskMenu_${task.id}`];
+            el && el.handleClick(event)
+        },
+
+        openNewWin() {
+            this.$store.dispatch('openWindow', {
+                name: `task-${this.taskDetail.id}`,
+                path: `/single/task/${this.taskDetail.id}?navActive=${this.navActive}`,
+                mode: 'window',
+                title: this.taskDetail.name,
+                titleFixed: true,
+                width: Math.min(window.screen.availWidth * 0.8, this.$el.clientWidth + 72),
+                height: Math.min(window.screen.availHeight * 0.8, this.$el.clientHeight + 72),
+                minWidth: this.hasOpenDialog ? 800 : 600,
+                minHeight: this.hasOpenDialog ? 600 : 450,
+            });
+            this.$store.dispatch('openTask', 0);
+        },
+
+        resizeDialog() {
+            return new Promise(resolve => {
+                const width = Math.max(1100, this.windowWidth);
+                const height = Math.max(720, Math.min(width * 0.8, this.windowHeight));
+                this.$Electron.sendMessage('windowSize', {
+                    width,
+                    height,
+                    minWidth: 800,
+                    minHeight: 600,
+                    autoZoom: true,
+                });
+                let num = 0;
+                let interval = setInterval(() => {
+                    num++;
+                    if (this.$refs.dialog || num > 20) {
+                        clearInterval(interval);
+                        if (this.$refs.dialog) {
+                            resolve()
+                        }
+                    }
+                }, 100);
+            })
+        },
+
+        viewFile(file) {
+            if (['jpg', 'jpeg', 'webp', 'gif', 'png'].includes(file.ext)) {
+                const list = this.fileList.filter(item => ['jpg', 'jpeg', 'webp', 'gif', 'png'].includes(item.ext))
+                const index = list.findIndex(item => item.id === file.id);
+                if (index > -1) {
+                    this.$store.dispatch("previewImage", {
+                        index,
+                        list: list.map(item => {
+                            return {
+                                src: item.path,
+                                width: item.width,
+                                height: item.height,
+                            }
+                        })
+                    })
+                } else {
+                    this.$store.dispatch("previewImage", {
+                        index: 0,
+                        list: [{
+                            src: file.path,
+                            width: file.width,
+                            height: file.height,
+                        }]
+                    })
+                }
+                return
+            }
+            const path = `/single/file/task/${file.id}`;
+            if (this.$Electron) {
+                this.$store.dispatch('openWindow', {
+                    name: `file-task-${file.id}`,
+                    path: path,
+                    title: `${file.name} (${$A.bytesToSize(file.size)})`,
+                    titleFixed: true,
+                });
+            } else if (this.$isEEUIApp) {
+                this.$store.dispatch('openAppChildPage', {
+                    pageType: 'app',
+                    pageTitle: `${file.name} (${$A.bytesToSize(file.size)})`,
+                    url: 'web.js',
+                    params: {
+                        titleFixed: true,
+                        url: $A.urlReplaceHash(path)
+                    },
+                });
+            } else {
+                window.open($A.mainUrl(path.substring(1)))
+            }
+        },
+
+        downFile(file) {
+            $A.modalConfirm({
+                language: false,
+                title: this.$L('下载文件'),
+                okText: this.$L('立即下载'),
+                content: `${file.name} (${$A.bytesToSize(file.size)})`,
+                onOk: () => {
+                    this.$store.dispatch('downUrl', $A.apiUrl(`project/task/filedown?file_id=${file.id}`))
+                }
+            });
+        },
+
+        showCisibleDropdown(event){
+            const list = [
+                {label: '项目人员', value: 1},
+                {label: '任务人员', value: 2},
+                {label: '指定成员', value: 3},
+            ];
+            this.$store.commit('menu/operation', {
+                event,
+                list,
+                size: 'large',
+                active: this.taskDetail.visibility,
+                onUpdate: (value) => {
+                    this.dropVisible(value)
+                }
+            })
+        },
+
+        showAtDropdown(event){
+            this.timeOpen = false
+            const list = [
+                {label: '任务延期', value: 1},
+                {label: '修改时间', value: 2},
+                {label: '清除时间', value: 3},
+            ];
+            this.$store.commit('menu/operation', {
+                event,
+                list,
+                size: 'large',
+                onUpdate: (value) => {
+                    this.dropDeadline(value)
+                }
+            })
+        },
+
+        visibleUserSelectShowChange(isShow){
+            if (!isShow && this.taskDetail.visibility_appointor.filter(id => id).length == 0) {
+                let old = this.taskDetail.old_visibility;
+                this.taskDetail.visibility = old > 2 ? 1 : (old || 1);
+                if (this.taskDetail.visibility < 3) {
+                    this.updateVisible();
+                }
+            }
+        },
+
+        dropVisible(command) {
+            switch (command) {
+                case 1:
+                case 2:
+                    this.taskDetail.visibility = command
+                    this.updateVisible();
+                    break;
+                case 3:
+                    this.taskDetail.old_visibility = this.taskDetail.visibility
+                    this.taskDetail.visibility = command
+                    this.$nextTick(() => {
+                        this.$refs.visibleUserSelectRef.onSelection()
+                    });
+                    break;
+            }
+        },
+
+        dropDeadline(command) {
+            switch (command) {
+                case 1:
+                    this.delayTaskQuicks = [
+                        {time: 1, type: 'day', name: '1天'},
+                        {time: 2, type: 'day', name: '2天'},
+                        {time: 3, type: 'day', name: '3天'},
+                        {time: 5, type: 'day', name: '5天'},
+                    ];
+                    const offDuty = $A.dayjs(`${$A.dayjs().format('YYYY-MM-DD')} ${this.systemConfig.task_default_time[1]}`)
+                    const diffEnd = offDuty.diff($A.dayjs(this.taskDetail.end_at), 'hour', true).toFixed(2)
+                    const diffEnd2 = offDuty.diff($A.dayjs(this.taskDetail.end_at).subtract(1, 'day'), 'day', true).toFixed(2)
+                    const quickEnd = {time: diffEnd, type: 'hour', name: `今天下班前`}
+                    const quickEnd2 = {time: diffEnd2, type: 'day', name: `明天下班前`}
+                    if (quickEnd.time >= 24) {
+                        quickEnd.type = 'day'
+                        quickEnd.time = (quickEnd.time / 24).toFixed(2)
+                    }
+                    quickEnd2.time > 0 && this.delayTaskQuicks.unshift(quickEnd2)
+                    quickEnd.time > 0 && this.delayTaskQuicks.unshift(quickEnd)
+                    this.delayTaskShow = true;
+                    break;
+                case 2:
+                    this.openTime()
+                    break;
+                case 3:
+                    this.updateData('times', {start_at: false, end_at: false})
+                    break;
+            }
+        },
+
+        onDelay(){
+            this.$refs.formDelayTaskRef.validate((valid) => {
+                if (!valid) {
+                    return
+                }
+                let {type, time} = this.delayTaskForm
+                if (type === 'day') {
+                    type = 'minute'
+                    time = time * 24 * 60
+                } else if (type === 'hour') {
+                    type = 'minute'
+                    time = time * 60
+                }
+                const endAt = $A.dayjs(this.taskDetail.end_at).add(time, type)
+                this.updateData('times', {
+                    start_at: this.taskDetail.start_at,
+                    end_at: endAt.format('YYYY-MM-DD HH:mm:ss'),
+                    desc: this.delayTaskForm.remark,
+                })
+                this.delayTaskShow = false
+                this.delayTaskForm.remark = ''
+                $A.IDBSet('delayTaskForm', this.delayTaskForm)
+            })
+        },
+
+        showFileDropdown(file, event){
+            this.operationFile = file
+            const list = [
+                {label: '查看附件', value: 1},
+                {label: '下载附件', value: 2},
+                {label: '删除附件', value: 3, style: {color:'#FF7070'}},
+            ];
+            this.$store.commit('menu/operation', {
+                event,
+                list,
+                size: 'large',
+                onUpdate: (value) => {
+                    this.dropFile(value)
+                }
+            })
+        },
+
+        dropFile(command) {
+            switch (command) {
+                case 1:
+                    this.viewFile(this.operationFile)
+                    break;
+                case 2:
+                    this.downFile(this.operationFile)
+                    break;
+                case 3:
+                    $A.modalConfirm({
+                        title: '删除文件',
+                        content: `你确定要删除文件【${this.operationFile.name}】吗？`,
+                        onOk: () => {
+                            this.deleteFile(this.operationFile)
+                        }
+                    });
+                    break;
+            }
+        },
+
+        updateVisible() {
+            this.updateData(['visibility', 'visibility_appointor'])
+        },
+
+        onTaskQuick(time, type) {
+            this.$set(this.delayTaskForm, 'time', Math.round(time * 100) / 100)
+            this.$set(this.delayTaskForm, 'type', type)
+        },
+
+        onTagAdd(tagName) {
+            // 避免关闭选择框时触发更新
+            this.tagValue = this.getTag;
+            this.tagBakValue = $A.cloneJSON(this.tagValue);
+            // 隐藏选择框并打开添加框
+            this.tagShow = false
+            this.$refs.addTag.onOpen(tagName ? {name: tagName} : null)
+        },
+
+        onTagAddSave(result) {
+            const current = this.tagValue;
+            const addData = result.filter(({data}) => data && data.id > 0).map(({data}) => data);
+            // 合并数组，如果有重名标签则使用新添加的标签数据
+            const mergedTags = [
+                ...addData,
+                ...current.filter(tag => !addData.some(newTag => newTag.name === tag.name))
+            ];
+            // 触发更新
+            this.updateData('tag', mergedTags);
+            this.$refs.tagSelect?.clearSearch();
+        },
+
+        getTypeLabel(type) {
+            this.msgTypes.some(item => {
+                if (item.value === type) {
+                    type = item.label
+                    return true
+                }
+            })
+            return type
+        },
+
+        onTypeChange(type) {
+            this.msgType = type
+        },
+
+        openTypeClick(event) {
+            if (this.msgTypes.length === 0) {
+                return
+            }
+            this.$store.commit('menu/operation', {
+                event,
+                list: this.msgTypes,
+                active: this.msgType,
+                activeClick: true,
+                language: false,
+                onUpdate: (type) => {
+                    this.navActive = 'dialog'
+                    this.$refs.dialog?.onMsgType(type)
+                }
+            })
+        },
+
+        autoScrollInto() {
+            return this.$isEEUIApp
+                && this.windowPortrait
+                && this.$refs.chatInput?.isFocus
+        },
+
+        scrollIntoInput() {
+            if (!this.autoScrollInto()) {
+                return;
+            }
+            this.$refs.taskDialog?.scrollIntoView({
+                block: "end"
+            })
+        },
+
+        keepIntoInput() {
+            if (!this.autoScrollInto()) {
+                return;
+            }
+            this.keepIntoTimer && clearTimeout(this.keepIntoTimer)
+            this.keepIntoTimer = setTimeout(_ => {
+                if (!this.autoScrollInto()) {
+                    return;
+                }
+                this.$store.dispatch("scrollBottom", this.$refs.taskDialog)
+            }, 500)
+        }
+    }
+}
+</script>
+
+<style lang="scss" scoped>
+.subtask-wrapper {
+    .subtask-icon {
+        overflow: hidden;
+
+        ::v-deep .task-menu-icon {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            .ivu-icon {
+                color: #ffffff !important;
+                font-size: 14px;
+
+                &.completed {
+                    color: #ffffff !important;
+                }
+            }
+        }
+    }
+
+    .subtask-name {
+        flex: 1;
+        margin: 0 12px 0 8px;
+        display: flex;
+        align-items: center;
+        min-width: 0;
+
+        .subtask-name-button {
+            flex: 1;
+            min-width: 120px;
+            max-width: 400px;
+            height: 22px;
+            line-height: 20px;
+            padding: 0 8px;
+            cursor: pointer;
+            border: 1px solid #dcdee2;
+            border-radius: 4px;
+            background: #fff;
+            transition: all 0.2s;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+
+            &:hover {
+                border-color: #2d8cf0;
+                background: rgba(45, 140, 240, 0.05);
+            }
+        }
+    }
+
+    .subtask-time {
+        margin: 0 8px;
+    }
+}
+
+// 隐藏 ColorPicker 的下拉箭头
+::v-deep .ivu-color-picker {
+    .ivu-color-picker-rel {
+        .ivu-icon-ios-arrow-down {
+            display: none;
+        }
+    }
+}
+
+// ColorPicker 弹出层需要最高的 z-index，确保不被子任务遮挡
+::v-deep .ivu-color-picker-dropdown {
+    z-index: 9999 !important;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+.milestone-item {
+    display: flex;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.milestone-final {
+    position: relative;
+    z-index: 10;
+    background: rgba(245, 245, 245, 0.85);
+    padding: 4px;
+    border-radius: 4px;
+
+    ::v-deep .ivu-color-picker {
+        position: relative;
+        z-index: 100;
+        background: #fff !important;
+        border-radius: 2px;
+
+        .ivu-color-picker-rel {
+            background: #fff !important;
+        }
+
+        .ivu-color-picker-color {
+            background: #fff !important;
+        }
+    }
+}
+
+.milestone-color-picker {
+    display: flex;
+    gap: 4px;
+    margin-right: 8px;
+}
+
+.color-option {
+    width: 20px;
+    height: 20px;
+    border-radius: 3px;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: all 0.2s;
+
+    &:hover {
+        transform: scale(1.1);
+    }
+
+    &.active {
+        border-color: #333;
+        box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+    }
+}
+
+.milestone-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.batch-milestone-form {
+    .form-tip {
+        padding: 12px;
+        background: #f0f9ff;
+        border: 1px solid #bae7ff;
+        border-radius: 4px;
+        margin-bottom: 16px;
+        color: #1890ff;
+        font-size: 13px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+
+        i {
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+    }
+
+    .form-row {
+        margin-bottom: 20px;
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+    }
+
+    .milestone-preview {
+        max-height: 300px;
+        overflow-y: auto;
+    }
+
+    .preview-item {
+        display: flex;
+        align-items: center;
+        margin-bottom: 12px;
+    }
+
+    .color-preview {
+        width: 30px;
+        height: 30px;
+        border-radius: 4px;
+        cursor: pointer;
+        border: 2px solid #ddd;
+        transition: all 0.2s;
+
+        &:hover {
+            transform: scale(1.1);
+            border-color: #999;
+        }
+    }
+
+    .color-picker-panel {
+        margin-top: 16px;
+        padding: 12px;
+        background: #f5f5f5;
+        border-radius: 4px;
+
+        .color-picker-title {
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .color-options {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .color-option-large {
+            width: 40px;
+            height: 40px;
+            border-radius: 4px;
+            cursor: pointer;
+            border: 3px solid transparent;
+            transition: all 0.2s;
+
+            &:hover {
+                transform: scale(1.1);
+            }
+
+            &.active {
+                border-color: #333;
+                box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.1);
+            }
+        }
+    }
+}
+
+.task-breadcrumbs,
+.subtask-breadcrumbs {
+    padding: 8px 16px;
+    margin-bottom: 8px;
+    background: #f5f7fa;
+    border-radius: 4px;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+
+    .breadcrumb-item {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .breadcrumb-link {
+        color: #2d8cf0;
+        cursor: pointer;
+        transition: all 0.2s;
+        padding: 2px 4px;
+        border-radius: 2px;
+
+        &:hover {
+            background: rgba(45, 140, 240, 0.1);
+            text-decoration: underline;
+        }
+    }
+
+    .breadcrumb-current {
+        color: #515a6e;
+        font-weight: 500;
+    }
+
+    .breadcrumb-arrow {
+        color: #c5c8ce;
+        font-size: 12px;
+        margin: 0 2px;
+    }
+}
+
+.subtask-breadcrumbs {
+    margin: 0 0 8px 0;
+    padding: 6px 12px;
+    font-size: 12px;
+}
+</style>

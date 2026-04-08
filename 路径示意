@@ -1,0 +1,649 @@
+H  (一般是局域网内通过ip共享的硬盘 所有人同步的路径 ，但小概率会用本地硬盘根目录)
+ ├─ ProjectA
+ │   ├─ Desgin
+ │   ├─ Assets
+ │   │   ├─ characters
+ │   │   │   ├─ HeroA
+ │   │   │   │   ├─ Model（下面可能会有zbush和maya文件夹分支）
+ │   │   │   │   │   ├─ History
+ │   │   │   │   │   │   ├─ HeroA_Mod_v001.ma
+ │   │   │   │   │   │   ├─ HeroA_Mod_v002.ma
+ │   │   │   │   │   ├─ HeroA_Mod.ma(实际文件 正常我不希望加v00x的版本号后缀，因为cg制作涉及到大量的文件引用和路径关联，每次增改版本号会导致路径错误文件出错。我希望最新文件保持干净的命名，只在数据里有合适的结构位置记录它的版本号和其他信息比如备注等等，当文件有更新时，将它移入History文件夹，文件名自动增加上版本号，并把更新的文件替换到这里，保持这个命名)
+ │   │   │   │   │   ├─ HeroA_Mod.png/jpg ？（预览模型和生成缩略图）(可以带版本号 如HeroA_Mod_v003.png)
+ │   │   │   │   │   ├─ Feedback
+ │   │   │   │   │   │   ├─ HeroA_Mod_v001(存放对应版本反馈的文件夹，不确定是否要加Feedback前缀，如Feedback_HeroA_Mod_v001)
+ │   │   │   │   │   │   │   ├─ HeroA_Mod_v001.doc（反馈文本及图片）
+ │   │   │   │   │   │   │   ├─ HeroA_Mod_v001.mov/mp4..(反馈视频 如果有的话)
+ │   │   │   │   │   │   ├─ HeroA_Mod_v002
+ │   │   │   │   ├─ texture（下面可能会有sp sd等分支）
+ │   │   │   │   │   ├─ HeroA_body_basecolor.png（同样涉及到命名规则
+ │   │   │   │   │   ├─ （或者是出现body face cloth等细化文件夹分支）
+ │   │   │   │   ├─ Rig
+ │   │   │   │   │   ├─ History
+ │   │   │   │   │   │   ├─ HeroA_Rig_v001.ma
+ │   │   │   │   │   │   ├─ HeroA_Rig_v002.ma
+ │   │   │   │   │   ├─ HeroA_Rig.ma (不加版本号 原因同模型)
+ │   │   │   │   │   ├─ Feedback
+ │   │   │   │   │   │   ├─ HeroA_Rig_v001(存放对应版本反馈的文件夹，不确定是否要加Feedback前缀，如Feedback_HeroA_Rig_v001)
+ │   │   │   │   │   │   │   ├─ HeroA_Rig_v001.doc（反馈文本及图片）
+ │   │   │   │   │   │   │   ├─ HeroA_Rig_v001.mov/mp4..(反馈视频 如果有的话)
+ │   │   │   │   │   │   ├─ HeroA_Rig_v002
+ │   │   │   │   └─ animation
+ │   │   │   │   └─ Reference （参考素材目录 对应具体素材文件夹 是 路径条理清晰， 否 花大量时间整理和管理素材）
+ │   │   │   ├─ HeroB
+ │   │   │   ├─ ......
+ │   │   │
+ │   │   ├─ props
+ │   │   └─ environments
+ │   │
+ │   ├─ Shots
+ │   │   ├─ Layout
+ │   │   │    ├─ Ep01（集数 如果有的话，这里就可能涉及到目录创建的自定义模板了）
+ │   │   │    │   ├─ Sc01（场次 可能有可能没有）
+ │   │   │    │   │   ├─ Shot010
+ │   │   │    │   │   │   ├─ History
+ │   │   │    │   │   │   │   ├─ ProjectA_Ep01_Sc01_Shot010_Layout_v001.ma
+ │   │   │    │   │   │   │   ├─ ProjectA_Ep01_Sc01_Shot010_Layout_v001.mov
+ │   │   │    │   │   │   │   ├─ ProjectA_Ep01_Sc01_Shot010_Layout_v002.ma
+ │   │   │    │   │   │   │   ├─ ProjectA_Ep01_Sc01_Shot010_Layout_v002.mov
+ │   │   │    │   │   │   ├─ ProjectA_Ep01_Sc01_Shot010_Layout_v003.ma(要注意我这里给文件名加了版本号，因为文件不涉及引用关联等问题，这里也涉及到命名规范以及命名模板，我应该要做一个监测功能 来检查文件提交的命名和内部规范，检测结果可能出自maya等软件输出或常规输出）)
+ │   │   │    │   │   │   ├─ ProjectA_Ep01_Sc01_Shot010_Layout_v003.mov
+ │   │   │    │   │   │   ├─ Feedback
+ │   │   │    │   │   │   │   ├─ ProjectA_Ep01_Sc01_Shot010_Layout_v001
+ │   │   │    │   │   │   │   │   ├─ ProjectA_Ep01_Sc01_Shot010_Layout_v001.MP4/mov
+ │   │   │    │   │   │   │   │   ├─ ProjectA_Ep01_Sc01_Shot010_Layout_v001.doc/jpg
+ │   │   │    │   │   │   │   ├─ ProjectA_Ep01_Sc01_Shot010_Layout_v002  （同样有些纠结 精确对应镜头版本号存储反馈 当然最好，但类似反馈通常都是整场戏合在一起的 精确分类也会有大量的整理工作 以及更多的人员参与维护 容易乱）
+ │   │   │    │   │   ├─ Shot020 (所有流程都有对应的镜头号文件夹)
+ │   │   │    │   │   ├─ .......
+ │   │   │    │   │   ├─ Feedback（给整场反馈汇总到一起？）
+ │   │   │    │   └─ Reference （参考素材目录 对应具体素材文件夹 是 路径条理清晰， 否 花大量时间整理和管理素材）
+ │   │   ├─ Animation
+ │   │   ├─ Cfx
+ │   │   ├─ Vfx
+ │   │   │    ├─ Ep01（集数 如果有的话，这里就可能涉及到目录创建的自定义模板了）
+ │   │   │    │   ├─ Sc01（场次 可能有可能没有）
+ │   │   │    │   │   ├─ Shot010
+ │   │   │    │   │   │   ├─ abc
+ │   │   │    │   │   │   ├─ History
+ │   │   │    │   │   │   ├─ out_ABC
+ │   │   │    │   │   │   ├─ UE
+ │   │   │    │   │   │   ├─ History
+ │   │   │    │   │   │   ├─ ProjectA_Ep01_Sc01_Shot010_vfx_v001.hip（这个是动画的后续流程 有什么办法能表现它对应的动画版本？把动画版本加进去会不会显得名字太长 缩写？ProjectA_Ep01_Sc01_Shot010_A010_vfx_v001.hip?或者是在详情页标注？）
+ │   │   │    │   │   │   ├─ ProjectA_Ep01_Sc01_Shot010_vfx_v001.mov
+ │   │   │    │   │   │   ├─ Feedback(??同样是反馈存放问题)
+ │   │   │    │   │   │   ├─ Reference(??)
+ │   │   │    ├─ Reference(存放位置 整体有一份 针对镜头有一份？)
+ │   │   ├─ Light
+ │   │   ├─ Comp
+ │   │
+ │   └─ Reference
+ │   └─ Desgin
+ │   └─ Feedback（项目整体反馈汇总文件夹？反馈存放方式？）
+ │   └─ Storyboard
+ │   └─......（其他目录 如甲方资产 临时目录 网络素材 制作规范等等）
+
+基于这个路径结构 分析利弊 帮忙设计一个文件和数据存储方案 我也希望有一套可以灵活编辑的路径模板 比如创建项目时能选择都有哪些流程（预设和自定义），流程里可以用常规预设和详细自定义来配置路径等等，另外看是否只能通过页面或客户端上传和浏览文件？ 有没有可能也能直接通过本地资源管理器读写文件？
+
+
+
+
+
+我按你 **“稳定文件名 + history版本”** 的思路，给你设计一套 **完整可落地的 CG 资产 / 镜头 / 文件管理方案**。
+目标是：
+
+* ✔ 不破坏引用路径
+* ✔ 自动版本管理
+* ✔ 兼容资源管理器直接操作
+* ✔ 数据库记录版本
+* ✔ 可以自动创建目录
+* ✔ 可以绑定任务
+
+这套方案 **非常适合中小型 CG 工作室**。
+
+---
+
+# 一、核心原则（整个系统的规则）
+
+必须遵守 4 个原则：
+
+### 1 文件路径永远稳定
+
+例如：
+
+```
+HeroA_Rig.ma
+```
+
+永远存在。
+
+镜头引用：
+
+```
+Assets/characters/HeroA/Rig/HeroA_Rig.ma
+```
+
+不会改变。
+
+---
+
+### 2 history 保存历史版本
+
+```
+Rig/
+ ├─ HeroA_Rig.ma
+ ├─ history/
+ │   ├─ HeroA_Rig_v001.ma
+ │   ├─ HeroA_Rig_v002.ma
+ │   └─ HeroA_Rig_v003.ma
+```
+
+---
+
+### 3 数据库记录版本
+
+数据库记录：
+
+```
+HeroA_Rig.ma
+当前版本 = v003
+```
+
+---
+
+### 4 文件系统只是存储
+
+系统核心数据在：
+
+```
+数据库
+```
+
+而不是文件夹。
+
+---
+
+# 二、完整目录结构（推荐）
+
+我帮你整理成 **标准化结构**：
+
+```
+H:（根目录）
+
+ ├─ ProjectA（项目名称）
+ │
+ │ ├─ Assets
+ │ │
+ │ │ ├─ characters
+ │ │ │
+ │ │ │ ├─ HeroA
+ │ │ │ │
+ │ │ │ │ ├─ Model
+ │ │ │ │ │
+ │ │ │ │ │ ├─ HeroA_Model.ma
+ │ │ │ │ │ ├─ preview
+ │ │ │ │ │ │   └─ HeroA_Model.png
+ │ │ │ │ │ ├─ history
+ │ │ │ │ │ │   ├─ HeroA_Model_v001.ma
+ │ │ │ │ │ │   ├─ HeroA_Model_v002.ma
+ │ │ │ │ │ └─ feedback
+ │ │ │ │ │     ├─ v001
+ │ │ │ │ │     └─ v002
+ │ │ │ │
+ │ │ │ │ ├─ Texture
+ │ │ │ │ │
+ │ │ │ │ │ ├─ body
+ │ │ │ │ │ │   ├─ HeroA_body_basecolor.png
+ │ │ │ │ │ │   ├─ HeroA_body_normal.png
+ │ │ │ │ │
+ │ │ │ │ │ ├─ face
+ │ │ │ │ │ │   ├─ HeroA_face_basecolor.png
+ │ │ │ │ │
+ │ │ │ │ │ ├─ history
+ │ │ │ │ │
+ │ │ │ │
+ │ │ │ │ ├─ Rig
+ │ │ │ │ │
+ │ │ │ │ │ ├─ HeroA_Rig.ma
+ │ │ │ │ │
+ │ │ │ │ │ ├─ history
+ │ │ │ │ │ │   ├─ HeroA_Rig_v001.ma
+ │ │ │ │ │ │   ├─ HeroA_Rig_v002.ma
+ │ │ │ │ │
+ │ │ │ │ │ ├─ preview
+ │ │ │ │ │ │   └─ HeroA_Rig.png
+ │ │ │ │ │
+ │ │ │ │ │ └─ feedback
+ │ │ │ │ │     ├─ v001
+ │ │ │ │ │     └─ v002
+ │ │ │ │
+ │ │ │ │ ├─ Animation
+ │ │ │ │
+ │ │ │ │ └─ Reference
+ │ │ │ │
+ │ │ │ ├─ HeroB
+ │ │ │
+ │ │ ├─ props
+ │ │
+ │ │ └─ environments
+ │
+ │
+ │ ├─ Shots
+ │ │
+ │ │ ├─ Layout
+ │ │ │
+ │ │ │ ├─ Ep01
+ │ │ │ │
+ │ │ │ │ ├─ Sc01
+ │ │ │ │ │
+ │ │ │ │ │ ├─ Shot010
+ │ │ │ │ │ │
+ │ │ │ │ │ │ ├─ ProjectA_Ep01_Sc01_Shot010_Layout_v001.ma
+ │ │ │ │ │ │ ├─ ProjectA_Ep01_Sc01_Shot010_Layout_v002.ma
+ │ │ │ │ │ │
+ │ │ │ │ │ │ ├─ history
+ │ │ │ │ │ │
+ │ │ │ │ │ │ ├─ preview
+ │ │ │ │ │ │
+ │ │ │ │ │ │ └─ feedback
+ │ │ │ │ │
+ │ │ │ │ │ └─ Shot020
+ │ │ │ │
+ │ │ │ └─ Reference
+ │ │
+ │ │ ├─ Animation
+ │ │ │
+ │ │ ├─ CFX
+ │ │
+ │ │ ├─ VFX
+ │ │ │   ├─ Ep01（集数 如果有的话，这里就涉及到目录创建的自定义模板了）
+ │ │ │   │   ├─ Sc01（场次 可能有可能没有）
+ │ │ │   │   │   ├─ Shot010
+ │ │ │   │   │   │   ├─ abc
+ │ │ │   │   │   │   ├─ History
+ │ │ │   │   │   │   ├─ out_ABC
+ │ │ │   │   │   │   ├─ UE
+ │ │ │   │   │   │   ├─ History
+ │ │ │   │   │   │   ├─ ProjectA_Ep01_Sc01_Shot010_vfx_v001.hip（这个是动画的后续流程 需要有数据库记录关联的上游环节（如动画）文件版本）
+ │ │ │   │   │   │   ├─ ProjectA_Ep01_Sc01_Shot010_vfx_v001.mov
+ │ │ │   │   │   │   ├─ Feedback(??同样是反馈存放问题)
+ │ │ │   │   │   │   ├─ Reference(??)
+ │ │ │   ├─ Reference(存放位置 整体有一份 针对镜头有一份？)
+ │ │
+ │ │ ├─ Light
+ │ │
+ │ │ └─ Comp
+ │
+ │
+ │ ├─ Reference
+ │
+ │ ├─ Design
+ │
+ │ ├─ Storyboard
+ │
+ │ └─ Temp
+```
+
+---
+
+# 三、资产版本规则（重点）
+
+以 Rig 为例：
+
+```
+HeroA_Rig.ma
+```
+
+始终是：
+
+```
+最新版本
+```
+
+---
+
+### 发布流程
+
+用户 publish 新版本
+
+系统自动：
+
+```
+HeroA_Rig.ma
+↓
+history/HeroA_Rig_v002.ma
+```
+
+然后保存：
+
+```
+HeroA_Rig.ma
+```
+
+数据库：
+
+```
+version = 3
+```
+
+---
+
+# 四、镜头引用机制
+
+镜头里引用：
+
+```
+Assets/characters/HeroA/Rig/HeroA_Rig.ma
+```
+
+当 Rig 更新：
+
+```
+HeroA_Rig.ma
+```
+
+镜头：
+
+自动更新。
+
+不会破引用。
+
+---
+
+# 五、镜头文件版本规则
+
+镜头建议：
+
+**直接带版本号**
+
+例如：
+
+```
+Shot010/
+ ├─ ProjectA_Ep01_Sc01_Shot010_Layout_v001.ma
+ ├─ ProjectA_Ep01_Sc01_Shot010_Layout_v002.ma
+```
+
+原因：
+
+镜头不会被大量引用。
+
+---
+
+# 六、数据库设计
+
+核心表：
+
+---
+
+### asset
+
+```
+id
+project_id
+name
+type
+category
+path
+```
+
+例如：
+
+```
+HeroA
+character
+```
+
+---
+
+### asset_task
+
+```
+asset_id
+task_type
+
+Model
+Rig
+Texture
+Animation
+```
+
+---
+
+### asset_versions
+
+```
+id
+asset_id
+task
+version
+file_path
+preview
+comment
+author
+created_at
+```
+
+例如：
+
+```
+HeroA_Rig
+v001
+v002
+v003
+```
+
+---
+
+### shots
+
+```
+id
+project_id
+episode
+scene
+shot
+```
+
+---
+
+### shot_versions
+
+```
+shot_id
+department
+version
+file_path
+```
+
+---
+
+# 七、目录自动创建
+
+创建资产：
+
+```
+HeroA
+```
+
+系统自动创建：
+
+```
+HeroA/
+    Model
+    Texture
+    Rig
+    Animation
+```
+
+---
+
+创建镜头：
+
+```
+Ep01 Sc01 Shot010
+```
+
+自动生成：
+
+```
+Shots/
+    Layout
+    Animation
+    CFX
+    VFX
+    Light
+    Comp
+```
+
+---
+
+# 八、资源管理器兼容
+
+必须支持：
+
+```
+Windows Explorer
+```
+
+例如：
+
+用户直接：
+
+```
+复制文件
+保存文件
+```
+
+系统通过：
+
+```
+定时扫描
+```
+
+或者
+
+```
+Publish按钮
+```
+
+同步数据库。
+
+---
+
+# 九、未来可以加的功能
+
+非常关键：
+
+### 1 自动生成缩略图
+
+```
+HeroA_Rig.png
+```
+
+---
+
+### 2 Maya检测
+
+检查：
+
+```
+missing reference
+贴图路径
+命名规范
+```
+
+---
+
+### 3 自动版本发布
+
+点击：
+
+```
+Publish
+```
+
+自动：
+
+```
+history
+version
+数据库
+```
+
+---
+
+### 4 资产依赖
+
+例如：
+
+```
+Shot010
+使用
+HeroA_Rig v002
+```
+
+---
+
+# 十、推荐技术架构
+
+你的项目：
+
+**后端**
+
+```
+Laravel
+```
+
+已经很好。
+
+---
+
+文件操作：
+
+```
+PHP
+或
+Go microservice
+```
+
+---
+
+客户端（推荐）
+
+```
+Electron
+```
+
+原因：
+
+可以直接访问本地文件。
+
+---
+
+# 十一、总结（这套方案的优点）
+
+✔ 不破引用
+✔ 自动版本管理
+✔ 支持资源管理器
+✔ 支持任务系统
+✔ 可扩展 pipeline
+
+非常适合：
+
+```
+10 ~ 80 人 CG团队
+```
+
+---
+
+如果你愿意，我可以继续帮你把 **下一层设计出来（这才是最关键的）**：
+
+我可以给你做一套 **CG Pipeline 最核心的系统**：
+
+1️⃣ **资产数据库完整结构（20+表）**
+2️⃣ **Publish系统设计**
+3️⃣ **Maya插件 Publish 工具**
+4️⃣ **自动创建目录模板系统**
+5️⃣ **资产引用追踪系统（电影级 pipeline）**
+
+这部分才是 **真正让系统变强的核心**。

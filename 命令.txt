@@ -1,0 +1,112 @@
+cd ~/projects/dootask
+cd ~/projects/plane-selfhost
+cd ~/projects/plane-dev
+
+docker compose down
+docker compose up -d
+
+查询状态
+docker compose ps
+
+
+
+http://localhost:2222
+
+
+进入数据库
+docker compose exec mariadb mysql -uwxp -p dootask
+
+在 Windows 里强制删除数据库
+打开 PowerShell（管理员权限）：
+
+Remove-Item "\\wsl$\Ubuntu\home\wxp\projects\dootask\docker\mysql\data" -Recurse -Force
+
+/////
+wsl -u root
+删除 MariaDB 数据目录：
+
+bash
+复制代码
+cd /home/wxp/projects/dootask/docker/mysql
+rm -rf data
+
+
+-Recurse 递归删除
+-Force 强制删除只读/系统文件
+这样可以一次性删除整个目录
+
+
+列出数据库
+docker volume ls | grep dootask
+删除库
+docker volume rm dootask-redis-data-local dootask-shared-data-local || true
+
+
+
+登录mariadb
+docker compose exec mariadb mysql -uwxp -pwxp dootask
+
+
+
+
+
+
+# 新目录
+mkdir ~/projects/plane-dev
+cd ~/projects/plane-dev/plane/apps/web
+
+cd ~/apps/web
+
+docker compose -f docker-compose-local.yml down
+docker compose -f docker-compose-local.yml up -d
+
+# 强制重启···
+docker compose up -d --force-recreate plane-migrator
+
+
+# clone 真正的源码仓库
+git clone https://github.com/makeplane/plane.git
+cd plane
+
+# 启动顺序
+# 1. 后端
+docker compose -f docker-compose-local.yml up -d
+
+# 2. monorepo 包
+pnpm install
+pnpm build
+
+# 3. 前端
+cd apps/web
+pnpm dev
+访问：
+
+arduino
+复制代码
+http://localhost:3000
+
+
+dootask
+
+在浏览器中访问 http://192.168.1.56:8080/，应该可以正常加载了。
+
+重要提示：以后如果要让局域网访问，不要运行 ./cmd dev 命令，因为它会启动开发服务器并生成 public/hot 文件，导致页面尝试加载开发服务器的资源（端口 21673）而无法访问。只需要保持 Docker 容器运行即可。
+
+如果需要修改代码后重新构建，使用 ./cmd prod 命令构建生产版本。
+
+账号                   密码
+admin@dloop.com	    dloop@123  	管理员
+dloop01@dloop.com	dloop@123 	管理员
+dloop02@dloop.com	dloop@123	管理员
+dloop03@dloop.com	dloop@123 	管理员
+dloop04@dloop.com	dloop@123	管理员
+dloop05@dloop.com	dloop@123	管理员
+test01@dloop.com	dloop@123	普通用户
+test02@dloop.com	dloop@123	普通用户
+test03@dloop.com	dloop@123	普通用户
+test04@dloop.com	dloop@123	普通用户
+test05@dloop.com	dloop@123	普通用户
+
+
+主机：192.168.1.23 （先别带 \\） -共享名：2023_160t
+用户名：administrator
